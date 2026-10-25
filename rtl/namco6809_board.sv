@@ -300,13 +300,14 @@ dpram_dc #(.widthad_a(10)) lbuf
 
 /////////////////////////////  Boards  /////////////////////////////
 
-// Super Pac-Man board (variant 0). Phozon / Mappy / Gaplus: not written yet (black, silent).
+// Super Pac-Man board (variant 0) and Mappy board (variant 2, the same module with its deltas gated).
+// Phozon / Gaplus: not written yet (black, silent).
 logic [7:0] sp_r, sp_g, sp_b, sp_hs_q;
 logic       sp_hs, sp_vs, sp_hb, sp_vb;
 
 superpac_board superpac
 (
-    .clk(clk), .reset(reset | ~is_sp), .pause(pause), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
+    .clk(clk), .reset(reset | ~(is_sp | is_mp)), .pause(pause), .mappy(is_mp), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
     .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
     .in_coins(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_buttons(in_buttons), .dsw0(dsw0), .dsw1(dsw1), .dsw2(dsw2),
     .ce_pix(ce_pix), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),
@@ -325,9 +326,9 @@ superpac_board superpac
     .hs_address(hs_address), .hs_data_in(hs_data_in), .hs_data_out(sp_hs_q), .hs_write(hs_write)
 );
 
-assign {video_r, video_g, video_b} = is_sp ? {sp_r, sp_g, sp_b} : 24'd0;
+assign {video_r, video_g, video_b} = (is_sp | is_mp) ? {sp_r, sp_g, sp_b} : 24'd0;
 assign {video_hs, video_vs, video_hblank, video_vblank} = {sp_hs, sp_vs, sp_hb, sp_vb};
-assign audio       = is_sp ? wsg15_0_o.sound : 16'sd0;
-assign hs_data_out = is_sp ? sp_hs_q : 8'd0;
+assign audio       = (is_sp | is_mp) ? wsg15_0_o.sound : 16'sd0;
+assign hs_data_out = (is_sp | is_mp) ? sp_hs_q : 8'd0;
 
 endmodule
