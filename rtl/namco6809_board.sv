@@ -307,7 +307,7 @@ logic       sp_hs, sp_vs, sp_hb, sp_vb;
 
 superpac_board superpac
 (
-    .clk(clk), .reset(reset | ~(is_sp | is_mp)), .pause(pause), .mappy(is_mp), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
+    .clk(clk), .reset(reset | ~(is_sp | is_mp)), .pause(pause), .mappy(is_mp), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
     .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
     .in_coins(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_buttons(in_buttons), .dsw0(dsw0), .dsw1(dsw1), .dsw2(dsw2),
     .ce_pix(ce_pix), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),

@@ -86,7 +86,7 @@ assign BUTTONS = 0;
 //   byte 0      board variant (see rtl/namco6809_board.sv)
 //   byte 1      flags: [0] 4-way joystick, [2] coins are 2-frame pulses, [4] vertical, [7] vertical is ROT90
 //   byte 2      custom I/O kinds: [1:0] chip 0, [3:2] chip 1 (0 = 56XX, 1 = 58XX, 2 = 59XX)
-//   byte 3      per-set options (board-defined)
+//   byte 3      per-set options: [0] no watchdog, [1] sprite ROM twice the board's base (256 sprites), [2] 64 sprite colours
 //   bytes 4-7   idle level of the non-DIP ports COINS, P1, P2, BUTTONS (here, not in <switches default>: only
 //               3 switch bytes survive Main_MiSTer's DIP default, see Common-Pitfalls)
 //   bytes 16-71 input map, one byte per port bit (COINS, P1, P2, BUTTONS, DSW0, DSW1, DSW2; bit 0 first)

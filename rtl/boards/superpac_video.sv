@@ -29,6 +29,8 @@ module superpac_video
     input  logic        clk,                // 49.152 MHz
     input  logic  [4:0] div,                // board divider: one pixel per div[2:0] cycle, hcnt[1:0] = div[4:3]
     input  logic        mappy,
+    input  logic        sprbig,             // sprite ROM twice the base (256 sprites: Grobda 16K 2bpp, Dig Dug II / Motos 32K 4bpp)
+    input  logic        slut64,             // Mappy board: 1024-entry sprite lookup (64 colours: Tower of Druaga)
     input  logic        flip,
     input  logic        crt_flip,
     input  logic  [7:0] scroll,             // Mappy: tilemap scroll (columns 2-33)
@@ -47,11 +49,11 @@ module superpac_video
     input  logic  [7:0] spr_q2,             //   bank 2: flip / size, disable / x MSB
     output logic [11:0] tile_rom_a,         // tiles region, read in the board's port-A slot (div 0-7)
     input  logic  [7:0] tile_rom_q,
-    output logic [13:0] spr_rom_a,          // sprites region (8K 2bpp / 16K 4bpp: sprite number bit 7 unused)
+    output logic [14:0] spr_rom_a,          // sprites region (8K or 16K 2bpp / 16K or 32K 4bpp)
     input  logic  [7:0] spr_rom_q,
     output logic  [8:0] clut_a,             // colour PROMs: palette 000-01F, char lookup 020-11F
     input  logic  [7:0] clut_q,
-    output logic  [7:0] slut_a,             // sprite lookup (colour PROM 120-21F)
+    output logic  [9:0] slut_a,             // sprite lookup (colour PROM 120-21F, Druaga 120-51F)
     input  logic  [7:0] slut_q,
     output logic  [9:0] lbuf_wa,            // line buffer: {half, x}, written by the sprite engine
     output logic  [7:0] lbuf_wd,
@@ -231,10 +233,12 @@ wire        e_vis = ~a1[1] && !e_row[9] && (e_row[8:5] == 4'd0) && (e_szy || !e_
 
 // sprite ROM: 2bpp 64 bytes per sprite, byte = {row bit 3, column group, row bits 2-0}, 4 pixels per byte;
 //             4bpp: MAME's ROM_LOAD16_BYTE pair, stored as two halves (gen_mra: even-byte file, then odd): planes
-//             0-1 from the first half, 2-3 from the second (+8K), 64 bytes per sprite in each
+//             0-1 from the first half, 2-3 from the second (+8K, or +16K for a 32K ROM), 64 bytes per sprite each.
+//             Sprite number bit 7 is used by the double-size ROMs only (sprbig; otherwise 128 sprites, MAME wraps).
 wire  [1:0] bcol  = flx ? ~gcol : gcol;
 wire  [7:0] tcode = code + {6'd0, ty ^ (szy & fly), tx ^ (szx & flx)};
-assign spr_rom_a  = {mappy & bsel, tcode[6:0], sr[3], bcol, sr[2:0]};
+assign spr_rom_a  = {mappy & sprbig & bsel, mappy ? (sprbig ? tcode[7] : bsel) : (sprbig & tcode[7]), tcode[6:0], sr[3], bcol,
+                     sr[2:0]};
 
 // pixel pipeline: lookup address -> PROM -> line buffer write (opaque pixels inside the 288-pixel line)
 wire  [1:0] pi    = flx ? ~pcnt : pcnt;
@@ -248,7 +252,7 @@ logic       pv1 = 1'b0, pv2 = 1'b0;
 always_ff @(posedge clk) begin
     pv1 <= 1'b0;
     if (st == S_PIX) begin
-        slut_a <= mappy ? {c0[3:0], spen4} : {c0[5:0], spen2};
+        slut_a <= !mappy ? {2'b00, c0[5:0], spen2} : slut64 ? {c0[5:0], spen4} : {2'b00, c0[3:0], spen4};
         px1    <= pxf;
         pv1    <= !px[9] && px[8:0] < 9'd288;
     end

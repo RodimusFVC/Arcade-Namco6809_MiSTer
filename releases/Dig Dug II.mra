@@ -1,0 +1,70 @@
+<misterromdescription>
+    <name>Dig Dug II</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform></platform>
+    <series>Dig Dug</series>
+    <year>1985</year>
+    <manufacturer>Namco</manufacturer>
+    <category>Action</category>
+
+    <setname>digdug2</setname>
+    <parent>digdug2</parent>
+    <mameversion>0289</mameversion>
+    <rbf>Namco6809</rbf>
+    <about></about>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (cw)</rotation>
+    <flip>yes</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>4-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>2</num_buttons>
+    <buttons names="Pump,Drill,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
+    <switches default="FF,FF,FF">
+        <dip name="Cabinet" bits="2" ids="Upright,Cocktail" values="1,0"/>
+        <dip name="Service Mode" bits="8" ids="Off,On" values="1,0"/>
+        <dip name="Lives" bits="9" ids="3,5" values="1,0"/>
+        <dip name="Coinage" bits="10,11" ids="1C/1C,2C/1C,1C/2C,3C/1C" values="3,2,1,0"/>
+        <dip name="Bonus Life" bits="12,13" ids="30k 80k and ...,30k 100k and ...,30k 120k and ...,30k 150k and..." values="3,2,1,0"/>
+        <dip name="Level Select" bits="14" ids="Off,On" values="1,0"/>
+        <dip name="Freeze" bits="15" ids="Off,On" values="1,0"/>
+    </switches>
+
+    <!-- Index 0: packed CPU / tile / sprite store 0x00000 (offsets in index 1), PROMs 0x18000, waveform 0x18800, 62XX 0x19000 -->
+    <rom index="0" md5="none" zip="digdug2.zip">
+        <part crc="cc155338" name="d23_3.1d"/>
+        <part crc="40e46af8" name="d23_1.1b"/>
+        <part crc="737443b1" name="d21_4.1k"/>
+        <part crc="afcb4509" name="d21_5.3b"/>
+        <part crc="df1f4ad8" name="d21_6.3m"/>
+        <part crc="ccadb3ea" name="d21_7.3n"/>
+        <part repeat="0x5000">00</part>
+        <part crc="9b169db5" name="d21-5.5b"/>
+        <part crc="55a88695" name="d21-6.4c"/>
+        <part crc="9c55feda" name="d21-7.5k"/>
+        <part repeat="0x5E0">00</part>
+        <part crc="e0074ee2" name="d21-3.3m"/>
+    </rom>
+
+    <!-- Index 1: board variant, flags, I/O kinds, control idle levels, input map, ROM offsets (see Arcade-Namco6809.sv) -->
+    <rom index="1">
+        <part>
+            02 91 01 03 FF FF FF FF 00 00 00 00 00 00 00 00
+            11 12 00 16 00 00 00 00 01 04 02 03 00 00 00 00
+            09 0C 0A 0B 00 00 00 00 05 0D 13 14 00 00 00 00
+            06 0E 00 16 00 00 00 00 00 00 00 00 00 00 00 00
+            00 00 00 00 00 00 00 00 80 01 A0 01 00 00 A0 00
+            B0 00
+        </part>
+    </rom>
+
+    <remark>Dig Dug II (New Ver.) (Namco)</remark>
+    <mratimestamp>20261024000000</mratimestamp>
+</misterromdescription>

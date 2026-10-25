@@ -1,7 +1,10 @@
 //============================================================================
 //
-//  Namco Super Pac-Man board (CPU A084-91434 / video A084-91435): superpac, superpacm (variant 0, mappy = 0)
-//  Namco Mappy board (CPU A084-91479 / video A084-91480): mappy, mappyj (variant 2, mappy = 1)
+//  Namco Super Pac-Man board (CPU A084-91434 / video A084-91435): superpac, superpacm, pacnpal*, grobda* (variant 0,
+//  mappy = 0); Grobda: 16K sprite ROM (opts[1]), speech through the 15XX (register 2 writes, MAME / PCB notes)
+//  Namco Mappy board (CPU A084-91479 / video A084-91480): mappy, mappyj (variant 2, mappy = 1); the same board with
+//  per-set options (index 1 byte 3): todruaga* (64 sprite colours, no watchdog), digdug2* (32K sprites, no watchdog),
+//  motos (32K sprites)
 //  Copyright (C) 2026 Rodimus
 //
 //  Written from the Super Pac-Man schematics (Bally Midway manual section 9), the Mappy schematics and MAME
@@ -34,6 +37,7 @@ module superpac_board
     input  logic        reset,
     input  logic        pause,
     input  logic        mappy,                  // Mappy board deltas
+    input  logic  [7:0] opts,                   // index 1 byte 3: [0] no watchdog, [1] 256 sprites, [2] 64 sprite colours
     input  logic  [1:0] io_kind0,
     input  logic  [1:0] io_kind1,
     input  logic [4:0][16:0] rom_ofs,           // packed-store offset per region: 0 maincpu, 1 sub, 3 tiles, 4 sprites
@@ -137,9 +141,9 @@ logic        sp_flip = 1'b0;
 logic  [7:0] scroll = 8'd0;
 wire         flip;
 logic [11:0] tile_rom_a;
-logic [13:0] spr_rom_a;
+logic [14:0] spr_rom_a;
 logic  [8:0] clut_a;
-logic  [7:0] slut_a;
+logic  [9:0] slut_a;
 logic [11:0] vid_vram_a;
 logic [10:0] vid_spr_a;
 logic  [9:0] v_lbuf_wa, v_lbuf_ra;
@@ -152,7 +156,7 @@ assign ce_pix = div[2:0] == 3'd7;
 
 superpac_video video
 (
-    .clk(clk), .div(div), .mappy(mappy), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
+    .clk(clk), .div(div), .mappy(mappy), .sprbig(opts[1]), .slut64(opts[2]), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
     .hcnt(hcnt), .vcnt(vcnt), .vblank_start(vblank_start),
     .vram_a(vid_vram_a), .vram_q(vram_qb),
     .spr_a(vid_spr_a), .spr_q0(wram_qb[0]), .spr_q1(wram_qb[1]), .spr_q2(wram_qb[2]),
@@ -171,7 +175,7 @@ assign lbuf_da     = v_lbuf_wd;
 assign lbuf_wa     = v_lbuf_we;
 assign lbuf_ab     = v_lbuf_ra;
 assign prom_b_addr = {2'b00, clut_a};
-assign prom_a_addr = 11'h120 + {3'b000, slut_a};
+assign prom_a_addr = 11'h120 + {1'b0, slut_a};
 
 /////////////////////////////  Main CPU  /////////////////////////////
 
@@ -230,7 +234,7 @@ always_ff @(posedge clk) begin
     else begin
         if (wd_hold != 12'd0) wd_hold <= wd_hold - 12'd1;
         if (cs_wdr && wr) wd_cnt <= 4'd0;
-        else if (vblank_start && !pause) begin
+        else if (vblank_start && !pause && !opts[0]) begin    // Dig Dug II / Druaga: no watchdog (MAME)
             if (wd_cnt == 4'd7) begin wd_cnt <= 4'd0; wd_hold <= 12'hFFF; end
             else wd_cnt <= wd_cnt + 4'd1;
         end
@@ -279,7 +283,7 @@ always_ff @(posedge clk) begin
         2'd1:    rom_a_addr <= sub_pk;
         default: rom_a_addr <= main_pk;
     endcase
-    rom_b_addr <= {3'd0, spr_rom_a} + rom_ofs[4];
+    rom_b_addr <= {2'd0, spr_rom_a} + rom_ofs[4];
     if (div == 5'd14) sub_rom_q  <= rom_a_q;
     if (div == 5'd30) main_rom_q <= rom_a_q;
 end
