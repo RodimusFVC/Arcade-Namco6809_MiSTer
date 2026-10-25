@@ -236,7 +236,15 @@ always_ff @(posedge clk) begin
         end
     end
 end
-wire cpu_rst = reset | (wd_hold != 12'd0);
+// Reset release synchronised to the frame start (beam at line 0, as MAME's power-on): the boot code runs without
+// interrupts, so the main CPU's phase against vblank is set here once. A random phase let Pac & Pal's main CPU clear
+// the shared RAM (43F0-43FF) inside the sound CPU's 1 ms vblank handler, wiping its RTI frame (sim 2026-10-25).
+logic run_ok = 1'b0;
+always_ff @(posedge clk) begin
+    if (reset)                                         run_ok <= 1'b0;
+    else if (ce_pix && hcnt == 9'd383 && vcnt == 9'd263) run_ok <= 1'b1;
+end
+wire cpu_rst = reset | ~run_ok | (wd_hold != 12'd0);
 
 logic [7:0] latch = 8'h00;
 assign flip = mappy ? latch[2] : sp_flip;
