@@ -65,6 +65,17 @@
         </part>
     </rom>
 
+    <!-- Index 3: hiscore config (MAME hiscore.dat), index 4: saved scores -->
+    <rom index="3" md5="none">
+        <part>
+            09 B7 36 9D 00 FF 00 02 00 02 00 01 11 11 00 00
+            00 00 10 2A 00 32 00 45
+            00 00 10 0B 00 03 00 00
+        </part>
+    </rom>
+    <rom index="4"></rom>
+    <nvram index="4" size="53"></nvram>
+
     <!-- Index 5: MAME artwork, layout table (from default.lay) + PNGs from the artwork zip, as-is -->
     <!-- OSD Artwork: View 1 = NMVA Artwork, View 2 = NMVA Artwork 4:3 -->
     <rom index="5" md5="none" zip="/mame-artwork/todruaga.zip">
