@@ -1,0 +1,79 @@
+<misterromdescription>
+    <name>Phozon (Sidam)</name>
+    <region>World</region>
+    <homebrew>no</homebrew>
+    <bootleg>no</bootleg>
+    <version></version>
+    <alternative></alternative>
+    <platform></platform>
+    <series>Phozon</series>
+    <year>1983</year>
+    <manufacturer>Namco (Sidam license)</manufacturer>
+    <category>Puzzle</category>
+
+    <setname>phozons</setname>
+    <parent>phozon</parent>
+    <mameversion>0289</mameversion>
+    <rbf>Namco6809</rbf>
+    <about></about>
+
+    <resolution>15kHz</resolution>
+    <rotation>vertical (cw)</rotation>
+    <flip>yes</flip>
+
+    <players>2 (alternating)</players>
+    <joystick>8-way</joystick>
+    <special_controls></special_controls>
+    <num_buttons>1</num_buttons>
+    <buttons names="Button 1,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+
+    <switches default="FF,FF,FF">
+        <dip name="Cabinet" bits="2" ids="Upright,Cocktail" values="1,0"/>
+        <dip name="Service Mode" bits="3" ids="Off,On" values="1,0"/>
+        <dip name="Unknown" bits="8" ids="Off,On" values="1,0"/>
+        <dip name="Difficulty" bits="9,11" ids="Rank 0,Rank 1,Rank 2,Rank 3,Rank 4,Rank 5,Rank 6,Rank 7" values="7,6,5,4,3,2,1,0"/>
+        <dip name="Level Select (Cheat)" bits="12" ids="Off,On" values="1,0"/>
+        <dip name="Stop Mode (Cheat)" bits="13" ids="Off,On" values="1,0"/>
+        <dip name="Coin B" bits="14,15" ids="2C/1C,1C/1C,2C/3C,1C/2C" values="1,3,0,2"/>
+        <dip name="Lives" bits="16,17" ids="1,3,4,5" values="1,3,2,0"/>
+        <dip name="Bonus Life" bits="18,20" ids="20k & 80k Only,20k; 80k & Every 80k,30k Only,30k & 60k Only,30k & 100k Only,30k & 100k Only,30k; 120k & Every 120k,None" values="1,4,2,5,7,6,3,0"/>
+        <dip name="Coin A" bits="21,23" ids="3C/1C,2C/1C,1C/1C,2C/3C,1C/2C,1C/3C,1C/6C,1C/7C" values="0,4,7,1,6,3,2,5"/>
+    </switches>
+
+    <!-- Index 0: packed CPU / tile / sprite store 0x00000 (offsets in index 1), PROMs 0x18000, waveform 0x18800, 62XX 0x19000 -->
+    <rom index="0" md5="none" zip="phozons.zip|phozon.zip">
+        <part crc="ef822900" name="6e.bin"/>
+        <part crc="acb7869e" name="6h.bin"/>
+        <part crc="8ffa3e0e" name="6c.bin"/>
+        <part crc="8e6800b3" name="6d.bin"/>
+        <part crc="5a4b3a79" name="3b.rom"/>
+        <part crc="5d9f0a28" name="9r.rom"/>
+        <part crc="312b3ece" name="7j.bin"/>
+        <part crc="d21422a2" name="8j.bin"/>
+        <part crc="d50f08f8" name="5t.rom"/>
+        <part repeat="0x8000">00</part>
+        <part crc="a2880667" name="ph1-2.1r"/>
+        <part crc="d6e08bef" name="ph1-1.1s"/>
+        <part crc="b2d69c72" name="ph1-3.1p"/>
+        <part crc="429e8fee" name="ph1-5.5l"/>
+        <part crc="9061db07" name="ph1-6.6r"/>
+        <part repeat="0x300">00</part>
+        <part crc="ad43688f" name="ph1-4.3e"/>
+    </rom>
+
+    <!-- Index 1: board variant, flags, I/O kinds, control idle levels, input map, ROM offsets (see Arcade-Namco6809.sv) -->
+    <rom index="1">
+        <part>
+            01 90 01 04 FF FF FF FF 00 00 00 00 00 00 00 00
+            11 12 00 16 00 00 00 00 01 04 02 03 00 00 00 00
+            09 0C 0A 0B 00 00 00 00 05 0D 13 14 00 00 00 00
+            00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+            00 00 00 00 00 00 00 00 80 01 A0 01 C0 01 C0 00
+            E0 00 00 01 02 03 04 05 06 07 00 01 02 03 04 05
+            06 07 00 02 05 06 01 03 04 07
+        </part>
+    </rom>
+
+    <remark>Phozon (Sidam) (Namco (Sidam License))</remark>
+    <mratimestamp>20261024000000</mratimestamp>
+</misterromdescription>

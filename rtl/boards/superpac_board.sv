@@ -27,7 +27,13 @@
 //    ROM        A000-FFFF                  8000-FFFF
 //  LS259 2M: Q0 sound CPU IRQ enable, Q1 main IRQ enable, Q2 flip (Mappy), Q3 SOUND ON, Q4 I/O chips run,
 //  Q5 sound CPU run.
-//  ROM store port A is time-sliced on div[4:3]: 0 tiles (video), 1 sound CPU, 2-3 main CPU.
+//  ROM store port A is time-sliced on div[4:3]: 0 tiles (video), 1 sound CPU, 2 main (Phozon: sub CPU), 3 main CPU.
+//
+//  Phozon board (variant 1, phozon = 1; no schematics: Super Pac board + MAME phozon_state): a third 6809 (sub CPU,
+//  pool m6809_2, E falling at div 23) shares the tilemap / work / sound RAM with the main CPU (RAM port A time-sliced:
+//  div[4:3] = 2 sub CPU, else main) and has 2K private RAM at A000 (pool xram). LS259: Q2 sub CPU IRQ enable,
+//  Q6 sub CPU run (no flip: the flip bit is in work RAM 1F7F, read by the video). Watchdog at 7000, ROM 8000-FFFF;
+//  the sound CPU has no LS259 access. DAC: 99XX assumed (Mappy / Gaplus era; #unverified, MAME has one model).
 //
 //============================================================================
 
@@ -37,6 +43,7 @@ module superpac_board
     input  logic        reset,
     input  logic        pause,
     input  logic        mappy,                  // Mappy board deltas
+    input  logic        phozon,                 // Phozon board deltas
     input  logic  [7:0] opts,                   // index 1 byte 3: [0] no watchdog, [1] 256 sprites, [2] 64 sprite colours
     input  logic  [1:0] io_kind0,
     input  logic  [1:0] io_kind1,
@@ -67,6 +74,8 @@ module superpac_board
     input  chip_pool_pkg::m6809r_o_t  m6809_0_o,
     output chip_pool_pkg::m6809r_i_t  m6809_1_i,
     input  chip_pool_pkg::m6809r_o_t  m6809_1_o,
+    output chip_pool_pkg::m6809r_i_t  m6809_2_i,          // Phozon sub CPU
+    input  chip_pool_pkg::m6809r_o_t  m6809_2_o,
     output chip_pool_pkg::wsg15_i_t   wsg_i,
     output logic                      wsg_smp,
     output chip_pool_pkg::namcoio_i_t io0_i,
@@ -104,6 +113,10 @@ module superpac_board
     output logic  [7:0] sram_db,
     output logic        sram_wb,
     input  logic  [7:0] sram_qb,
+    output logic [10:0] xram_aa,                // Phozon sub CPU private RAM (A000-A7FF)
+    output logic  [7:0] xram_da,
+    output logic        xram_wa,
+    input  logic  [7:0] xram_qa,
     output logic  [9:0] lbuf_aa,
     output logic  [7:0] lbuf_da,
     output logic        lbuf_wa,
@@ -133,6 +146,8 @@ wire fall_q  = (div == 5'd23) & ~pause_x;      // main CPU
 wire fall_e  = (div == 5'd31) & ~pause_x;
 wire sfall_q = (div == 5'd7)  & ~pause_x;      // sound CPU: opposite E phase
 wire sfall_e = (div == 5'd15) & ~pause_x;
+wire fall_q2 = (div == 5'd15) & ~pause_x & phozon;    // Phozon sub CPU: E falls at the end of ROM / RAM slot 2
+wire fall_e2 = (div == 5'd23) & ~pause_x & phozon;
 
 /////////////////////////////  Video  /////////////////////////////
 
@@ -140,23 +155,23 @@ logic        vblank_start;
 logic        sp_flip = 1'b0;
 logic  [7:0] scroll = 8'd0;
 wire         flip;
-logic [11:0] tile_rom_a;
+logic [12:0] tile_rom_a;
 logic [14:0] spr_rom_a;
-logic  [8:0] clut_a;
-logic  [9:0] slut_a;
+logic  [9:0] clut_a;
+logic [10:0] slut_a;
 logic [11:0] vid_vram_a;
 logic [10:0] vid_spr_a;
 logic  [9:0] v_lbuf_wa, v_lbuf_ra;
 logic  [7:0] v_lbuf_wd;
 logic        v_lbuf_we;
 logic  [8:0] hcnt, vcnt;
-logic  [7:0] main_rom_q, sub_rom_q;
+logic  [7:0] main_rom_q, sub_rom_q, sub2_rom_q;
 
 assign ce_pix = div[2:0] == 3'd7;
 
 superpac_video video
 (
-    .clk(clk), .div(div), .mappy(mappy), .sprbig(opts[1]), .slut64(opts[2]), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
+    .clk(clk), .div(div), .mappy(mappy), .phozon(phozon), .sprbig(opts[1]), .slut64(opts[2]), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
     .hcnt(hcnt), .vcnt(vcnt), .vblank_start(vblank_start),
     .vram_a(vid_vram_a), .vram_q(vram_qb),
     .spr_a(vid_spr_a), .spr_q0(wram_qb[0]), .spr_q1(wram_qb[1]), .spr_q2(wram_qb[2]),
@@ -174,8 +189,8 @@ assign lbuf_aa     = v_lbuf_wa;
 assign lbuf_da     = v_lbuf_wd;
 assign lbuf_wa     = v_lbuf_we;
 assign lbuf_ab     = v_lbuf_ra;
-assign prom_b_addr = {2'b00, clut_a};
-assign prom_a_addr = 11'h120 + {1'b0, slut_a};
+assign prom_b_addr = {1'b0, clut_a};
+assign prom_a_addr = slut_a;
 
 /////////////////////////////  Main CPU  /////////////////////////////
 
@@ -201,13 +216,13 @@ wire cs_vram  = bank == 3'd0;
 wire cs_wram0 = bank == 3'd1;
 wire cs_wram1 = bank == 3'd2;
 wire cs_wram2 = bank == 3'd3;
-wire cs_flip  = !mappy && a[15:11] == 5'b00100;
+wire cs_flip  = !mappy && !phozon && a[15:11] == 5'b00100;
 wire cs_scrl  = mappy && a[15:11] == 5'b00111;
 wire cs_sram  = a[15:11] == 5'b01000;
 wire cs_io    = a[15:11] == 5'b01001;
 wire cs_latch = a[15:11] == 5'b01010;
-wire cs_wdr   = a[15:11] == 5'b10000;
-wire cs_rom   = mappy ? a[15] : a[15:13] >= 3'b101;
+wire cs_wdr   = phozon ? a[15:11] == 5'b01110 : a[15:11] == 5'b10000;    // Phozon 7000
+wire cs_rom   = (mappy || phozon) ? a[15] : a[15:13] >= 3'b101;
 
 /////////////////////////////  Sound CPU  /////////////////////////////
 
@@ -217,8 +232,21 @@ wire        srw = m6809_1_o.rw;
 wire        swr = sfall_e & ~srw;
 
 wire scs_sram  = sa[15:13] == 3'b000;
-wire scs_latch = sa[15:13] == 3'b001;
+wire scs_latch = !phozon && sa[15:13] == 3'b001;
 wire scs_rom   = sa[15:13] == 3'b111;
+
+/////////////////////////////  Phozon sub CPU  /////////////////////////////
+
+wire [15:0] a2  = m6809_2_o.a;
+wire  [7:0] do2 = m6809_2_o.dout;
+wire        rw2 = m6809_2_o.rw;
+wire        wr2 = fall_e2 & ~rw2;
+
+wire [2:0] bank2   = ram_bank(a2, 1'b0);       // tilemap / work RAM as the main CPU (Super Pac map)
+wire       s2_sram = a2[15:11] == 5'b01000;
+wire       s2_xram = a2[15:11] == 5'b10100;
+wire       s2_rom  = a2[15:13] == 3'b111;
+wire       slot2   = phozon && div[4:3] == 2'd2;   // RAM port A belongs to the sub CPU
 
 /////////////////////////////  Watchdog, LS259, IRQs, flip  /////////////////////////////
 
@@ -252,7 +280,7 @@ wire cpu_rst = reset | ~run_ok | (wd_hold != 12'd0);
 
 logic [7:0] latch = 8'h00;
 assign flip = mappy ? latch[2] : sp_flip;
-logic       irq_m = 1'b0, irq_s = 1'b0;
+logic       irq_m = 1'b0, irq_s = 1'b0, irq_s2 = 1'b0;
 always_ff @(posedge clk) begin
     if (cpu_rst) begin
         latch   <= 8'h00;
@@ -269,32 +297,37 @@ always_ff @(posedge clk) begin
     else if (vblank_start)    irq_m <= 1'b1;
     if (cpu_rst || !latch[0]) irq_s <= 1'b0;
     else if (vblank_start)    irq_s <= 1'b1;
+    if (cpu_rst || !latch[2] || !phozon) irq_s2 <= 1'b0;
+    else if (vblank_start)               irq_s2 <= 1'b1;
 end
 
 /////////////////////////////  ROM store port A slots  /////////////////////////////
 
 wire [16:0] main_pk = {1'b0, a}  + rom_ofs[0];
 wire [16:0] sub_pk  = {1'b0, sa} + rom_ofs[1];
-wire [16:0] tile_pk = {5'd0, tile_rom_a} + rom_ofs[3];
+wire [16:0] sub2_pk = {1'b0, a2} + rom_ofs[2];
+wire [16:0] tile_pk = {4'd0, tile_rom_a} + rom_ofs[3];
 
 always_ff @(posedge clk) begin
     case (div[4:3])
         2'd0:    rom_a_addr <= tile_pk;        // video reads at div 6
         2'd1:    rom_a_addr <= sub_pk;
+        2'd2:    rom_a_addr <= phozon ? sub2_pk : main_pk;
         default: rom_a_addr <= main_pk;
     endcase
     rom_b_addr <= {2'd0, spr_rom_a} + rom_ofs[4];
     if (div == 5'd14) sub_rom_q  <= rom_a_q;
+    if (div == 5'd22) sub2_rom_q <= rom_a_q;
     if (div == 5'd30) main_rom_q <= rom_a_q;
 end
 
 /////////////////////////////  RAMs  /////////////////////////////
 
-// port A: main CPU, or the hiscore system while paused
-wire [15:0] pa_x  = pause ? hs_address : a;
+// port A: main CPU (Phozon: the sub CPU in slot 2), or the hiscore system while paused
+wire [15:0] pa_x  = pause ? hs_address : slot2 ? a2 : a;
 wire  [2:0] pa_bk = ram_bank(pa_x, mappy);
-wire        pa_we = pause ? hs_write : wr;
-wire  [7:0] pa_d  = pause ? hs_data_in : do_;
+wire        pa_we = pause ? hs_write : slot2 ? wr2 : wr;
+wire  [7:0] pa_d  = pause ? hs_data_in : slot2 ? do2 : do_;
 
 assign vram_aa = mappy ? pa_x[11:0] : {1'b0, pa_x[10:0]};
 assign vram_da = pa_d;
@@ -318,27 +351,32 @@ always_comb begin
     endcase
 end
 
-// sound RAM: main CPU on port A, sound CPU on port B
-assign sram_aa = a[9:0];
-assign sram_da = do_;
-assign sram_wa = cs_sram && wr;
+// sound RAM: main CPU (Phozon: + sub CPU in slot 2) on port A, sound CPU on port B
+assign sram_aa = slot2 ? a2[9:0] : a[9:0];
+assign sram_da = slot2 ? do2 : do_;
+assign sram_wa = slot2 ? s2_sram && wr2 : cs_sram && wr;
 assign sram_ab = sa[9:0];
 assign sram_db = sdo;
 assign sram_wb = scs_sram && swr;
 
+assign xram_aa = a2[10:0];
+assign xram_da = do2;
+assign xram_wa = s2_xram && wr2;
+
 /////////////////////////////  15XX  /////////////////////////////
 
-// register writes snooped from both CPUs (never on the same clock: opposite E phases)
+// register writes snooped from every CPU (never on the same clock: E falls at div 31 / 15 / 23)
 logic [10:0] smp_div = 11'd0;
 always_ff @(posedge clk) smp_div <= smp_div + 11'd1;
 assign wsg_smp = smp_div == 11'd0 && !pause;   // 24 kHz
 
 wire wsg_mw = cs_sram && wr && a[9:6] == 4'd0;
+wire wsg_2w = s2_sram && wr2 && a2[9:6] == 4'd0;
 assign wsg_i.sound_en = latch[3];
-assign wsg_i.dac_mode = mappy ? 2'd1 : 2'd0;    // 99XX : LS273 + 4066 ladder
-assign wsg_i.reg_wr   = wsg_mw || (scs_sram && swr && sa[9:6] == 4'd0);
-assign wsg_i.reg_addr = wsg_mw ? a[5:0] : sa[5:0];
-assign wsg_i.reg_din  = wsg_mw ? do_ : sdo;
+assign wsg_i.dac_mode = (mappy || phozon) ? 2'd1 : 2'd0;    // 99XX : LS273 + 4066 ladder
+assign wsg_i.reg_wr   = wsg_mw || wsg_2w || (scs_sram && swr && sa[9:6] == 4'd0);
+assign wsg_i.reg_addr = wsg_mw ? a[5:0] : wsg_2w ? a2[5:0] : sa[5:0];
+assign wsg_i.reg_din  = wsg_mw ? do_ : wsg_2w ? do2 : sdo;
 assign wsg_i.wave_d   = wave_q;
 
 /////////////////////////////  56XX x2  /////////////////////////////
@@ -385,6 +423,18 @@ always_comb begin
 end
 wire [7:0] sub_di = scs_rom ? sub_rom_q : scs_sram ? sram_qb : 8'hFF;
 
+logic [7:0] sub2_di;
+always_comb begin
+    if      (s2_rom)          sub2_di = sub2_rom_q;
+    else if (bank2 == 3'd0)   sub2_di = vram_qa;
+    else if (bank2 == 3'd1)   sub2_di = wram_qa[0];
+    else if (bank2 == 3'd2)   sub2_di = wram_qa[1];
+    else if (bank2 == 3'd3)   sub2_di = wram_qa[2];
+    else if (s2_sram)         sub2_di = sram_qa;
+    else if (s2_xram)         sub2_di = xram_qa;
+    else                      sub2_di = 8'hFF;
+end
+
 assign m6809_0_i.reset_n = ~cpu_rst;
 assign m6809_0_i.fall_e  = fall_e;
 assign m6809_0_i.fall_q  = fall_q;
@@ -401,8 +451,16 @@ assign m6809_1_i.firq_n  = 1'b1;
 assign m6809_1_i.nmi_n   = 1'b1;
 assign m6809_1_i.d       = sub_di;
 
+assign m6809_2_i.reset_n = ~cpu_rst & latch[6] & phozon;
+assign m6809_2_i.fall_e  = fall_e2;
+assign m6809_2_i.fall_q  = fall_q2;
+assign m6809_2_i.irq_n   = ~irq_s2;
+assign m6809_2_i.firq_n  = 1'b1;
+assign m6809_2_i.nmi_n   = 1'b1;
+assign m6809_2_i.d       = sub2_di;
+
 /* verilator lint_off UNUSED */
-wire unused = ^hcnt | ^vcnt | ^rom_ofs[2] | ^m6809_0_o.lic | ^m6809_1_o.lic | ^io0_o.out | ^io1_o.out[7:1];
+wire unused = ^hcnt | ^vcnt | ^m6809_0_o.lic | ^m6809_1_o.lic | ^m6809_2_o.lic | ^io0_o.out | ^io1_o.out[7:1];
 /* verilator lint_on UNUSED */
 
 endmodule

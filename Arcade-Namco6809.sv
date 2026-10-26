@@ -91,18 +91,23 @@ assign BUTTONS = 0;
 //               3 switch bytes survive Main_MiSTer's DIP default, see Common-Pitfalls)
 //   bytes 16-71 input map, one byte per port bit (COINS, P1, P2, BUTTONS, DSW0, DSW1, DSW2; bit 0 first)
 //   bytes 72-81 packed ROM store offsets, u16 LE in 256-byte units (17-bit, mod 2^17): maincpu, sub, sub2, tiles, sprites
+//   bytes 82-105 DIP bit permutation: for each DIP port (DSW0-2) and bit, its bit in the OSD DIP byte (identity except
+//               Phozon DSW2, whose non-contiguous fields the generator packs; Exidy core's scheme)
 // DIP switch bytes 0-2 = DSW0, DSW1, DSW2 (Gaplus: nibble ports packed by tools/gen_mra.py); a pressed control
 // inverts its bit
 localparam NPORT = 7;
 reg  [7:0] game_cfg[16] = '{8'd0, 8'h90, 8'd0, 8'd0, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0};
 reg  [7:0] in_map[NPORT*8];
 reg  [7:0] rom_ofs_b[10];
+reg  [2:0] dip_perm[24];
+initial for (int i = 0; i < 24; i++) dip_perm[i] = 3'(i % 8);
 
 always @(posedge CLK_49M) begin
     if (ioctl_wr && ioctl_index == 8'd1) begin
         if (ioctl_addr < 25'd16) game_cfg[ioctl_addr[3:0]] <= ioctl_dout;
         else if (ioctl_addr < 25'(16 + NPORT*8)) in_map[6'(ioctl_addr - 25'd16)] <= ioctl_dout;
         else if (ioctl_addr < 25'(16 + NPORT*8 + 10)) rom_ofs_b[4'(ioctl_addr - 25'(16 + NPORT*8))] <= ioctl_dout;
+        else if (ioctl_addr < 25'(16 + NPORT*8 + 34)) dip_perm[5'(ioctl_addr - 25'(16 + NPORT*8 + 10))] <= ioctl_dout[2:0];
     end
 end
 
@@ -270,10 +275,28 @@ end
 
 wire [NPORT*8-1:0]  idle;
 wire [NPORT*64-1:0] in_map_flat;
+wire [NPORT*8-1:0]  port_sel;                       // control ports: idle level; DSW0-2: OSD DIP bytes 0-2
+wire [NPORT*24-1:0] dip_bit;
+wire [63:0]         dip_bytes = {dip_sw[7], dip_sw[6], dip_sw[5], dip_sw[4], dip_sw[3], dip_sw[2], dip_sw[1], dip_sw[0]};
 genvar gi;
 generate
 	for (gi = 0; gi < NPORT; gi = gi + 1) begin : g_port
-		assign idle[gi*8 +: 8] = gi < 4 ? game_cfg[4 + gi] : dip_sw[gi - 4];
+		if (gi < 4) begin : g_ctl
+			assign idle[gi*8 +: 8]     = game_cfg[4 + gi];
+			assign port_sel[gi*8 +: 8] = 8'h80;
+		end
+		else begin : g_dsw
+			assign idle[gi*8 +: 8]     = dip_sw[gi - 4];
+			assign port_sel[gi*8 +: 8] = 8'(gi - 4);
+		end
+	end
+	for (gi = 0; gi < NPORT*8; gi = gi + 1) begin : g_dbit
+		if (gi < 32) begin : g_ctl
+			assign dip_bit[gi*3 +: 3] = 3'(gi % 8);
+		end
+		else begin : g_dsw
+			assign dip_bit[gi*3 +: 3] = dip_perm[gi - 32];
+		end
 	end
 	for (gi = 0; gi < NPORT*8; gi = gi + 1) begin : g_map
 		assign in_map_flat[gi*8 +: 8] = in_map[gi];
@@ -281,14 +304,19 @@ generate
 endgenerate
 
 wire [NPORT*8-1:0] in_ports;
-ctl_port_map #(.NP(NPORT), .IDW(6)) port_map
+// DIPPERM-2026-10-25: BASE_MODE 2 (per-bit DIP permutation, Phozon); was BASE_MODE 0 with the DIP bytes as idle levels
+// ctl_port_map #(.NP(NPORT), .IDW(6)) port_map
+ctl_port_map #(.NP(NPORT), .IDW(6), .BASE_MODE(2)) port_map
 (
 // CTL-2026-10-25: original port list below (v1 had no port_sel / dip_bytes / dip_bit)
 // 	.clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .ctl(ctl),
 // 	.ovr_mask('0), .ovr_val('0), .ports(in_ports)
 	// CTL-2026-10-25: v2 ports tied 0 (BASE_MODE 0 = v1 idle levels; they are unused)
-	.clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .port_sel({(NPORT*8){1'b0}}),
-	.dip_bytes(64'd0), .dip_bit({(NPORT*24){1'b0}}), .ctl(ctl),
+	// DIPPERM-2026-10-25: original v2 tie-offs below
+	// .clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .port_sel({(NPORT*8){1'b0}}),
+	// .dip_bytes(64'd0), .dip_bit({(NPORT*24){1'b0}}), .ctl(ctl),
+	.clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .port_sel(port_sel),
+	.dip_bytes(dip_bytes), .dip_bit(dip_bit), .ctl(ctl),
 	.ovr_mask('0), .ovr_val('0), .ports(in_ports)
 );
 

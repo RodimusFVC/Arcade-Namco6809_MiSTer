@@ -84,16 +84,10 @@ wire is_gp = variant == 8'd3;
 chip_pool_pkg::m6809r_i_t m6809_i[3];
 chip_pool_pkg::m6809r_o_t m6809_o[3];
 
-chip_pool_pkg::m6809r_i_t sp_m6809_0_i, sp_m6809_1_i;
+chip_pool_pkg::m6809r_i_t sp_m6809_0_i, sp_m6809_1_i, sp_m6809_2_i;
 assign m6809_i[0] = sp_m6809_0_i;
 assign m6809_i[1] = sp_m6809_1_i;
-assign m6809_i[2].reset_n = 1'b0;            // idle until the Phozon / Gaplus boards
-assign m6809_i[2].fall_e  = 1'b0;
-assign m6809_i[2].fall_q  = 1'b0;
-assign m6809_i[2].irq_n   = 1'b1;
-assign m6809_i[2].firq_n  = 1'b1;
-assign m6809_i[2].nmi_n   = 1'b1;
-assign m6809_i[2].d       = 8'hFF;
+assign m6809_i[2] = sp_m6809_2_i;            // Phozon sub CPU (Gaplus: later)
 
 genvar ci;
 generate
@@ -254,8 +248,7 @@ logic [10:0] wram_aa[3], wram_ab[3];
 logic  [7:0] wram_da[3], wram_qa[3], wram_qb[3];
 logic        wram_wa[3];
 
-// driven by the board (xram: Phozon only, idle)
-assign {xram_aa, xram_da, xram_wa} = '0;
+// driven by the board (xram: Phozon sub CPU private RAM)
 logic [2:0][10:0] sp_wram_aa;
 logic [2:0] [7:0] sp_wram_da, sp_wram_qa, sp_wram_qb;
 logic [2:0]       sp_wram_wa;
@@ -300,19 +293,20 @@ dpram_dc #(.widthad_a(10)) lbuf
 
 /////////////////////////////  Boards  /////////////////////////////
 
-// Super Pac-Man board (variant 0) and Mappy board (variant 2, the same module with its deltas gated).
-// Phozon / Gaplus: not written yet (black, silent).
+// Super Pac-Man (variant 0), Phozon (variant 1) and Mappy (variant 2) boards: one module, deltas gated.
+// Gaplus: not written yet (black, silent).
 logic [7:0] sp_r, sp_g, sp_b, sp_hs_q;
 logic       sp_hs, sp_vs, sp_hb, sp_vb;
 
 superpac_board superpac
 (
-    .clk(clk), .reset(reset | ~(is_sp | is_mp)), .pause(pause), .mappy(is_mp), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
+    .clk(clk), .reset(reset | ~(is_sp | is_ph | is_mp)), .pause(pause), .mappy(is_mp), .phozon(is_ph), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
     .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
     .in_coins(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_buttons(in_buttons), .dsw0(dsw0), .dsw1(dsw1), .dsw2(dsw2),
     .ce_pix(ce_pix), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),
     .video_hblank(sp_hb), .video_vblank(sp_vb),
     .m6809_0_i(sp_m6809_0_i), .m6809_0_o(m6809_o[0]), .m6809_1_i(sp_m6809_1_i), .m6809_1_o(m6809_o[1]),
+    .m6809_2_i(sp_m6809_2_i), .m6809_2_o(m6809_o[2]),
     .wsg_i(wsg15_0_i), .wsg_smp(wsg15_0_smp),
     .io0_i(namcoio_i[0]), .io0_o(namcoio_o[0]), .io1_i(namcoio_i[1]), .io1_o(namcoio_o[1]),
     .rom_a_addr(rom_a_addr), .rom_a_q(rom_a_q), .rom_b_addr(rom_b_addr), .rom_b_q(rom_b_q),
@@ -322,13 +316,14 @@ superpac_board superpac
     .wram_qb(sp_wram_qb),
     .sram_aa(sram_aa), .sram_da(sram_da), .sram_wa(sram_wa), .sram_qa(sram_qa),
     .sram_ab(sram_ab), .sram_db(sram_db), .sram_wb(sram_wb), .sram_qb(sram_qb),
+    .xram_aa(xram_aa), .xram_da(xram_da), .xram_wa(xram_wa), .xram_qa(xram_qa),
     .lbuf_aa(lbuf_aa), .lbuf_da(lbuf_da), .lbuf_wa(lbuf_wa), .lbuf_ab(lbuf_ab), .lbuf_qb(lbuf_qb),
     .hs_address(hs_address), .hs_data_in(hs_data_in), .hs_data_out(sp_hs_q), .hs_write(hs_write)
 );
 
-assign {video_r, video_g, video_b} = (is_sp | is_mp) ? {sp_r, sp_g, sp_b} : 24'd0;
+assign {video_r, video_g, video_b} = (is_sp | is_ph | is_mp) ? {sp_r, sp_g, sp_b} : 24'd0;
 assign {video_hs, video_vs, video_hblank, video_vblank} = {sp_hs, sp_vs, sp_hb, sp_vb};
-assign audio       = (is_sp | is_mp) ? wsg15_0_o.sound : 16'sd0;
-assign hs_data_out = (is_sp | is_mp) ? sp_hs_q : 8'd0;
+assign audio       = (is_sp | is_ph | is_mp) ? wsg15_0_o.sound : 16'sd0;
+assign hs_data_out = (is_sp | is_ph | is_mp) ? sp_hs_q : 8'd0;
 
 endmodule
