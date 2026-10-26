@@ -35,6 +35,13 @@
 //  Q6 sub CPU run (no flip: the flip bit is in work RAM 1F7F, read by the video). Watchdog at 7000, ROM 8000-FFFF;
 //  the sound CPU has no LS259 access. DAC: 99XX assumed (Mappy / Gaplus era; #unverified, MAME has one model).
 //
+//  Gaplus board (variant 3, gaplus = 1; MAME gaplus_state + Midway schematics): the sub CPU (MAME "sub", pool m6809_2,
+//  ROM A000-FFFF) shares tilemap / work RAM as on Phozon; the sound CPU is MAME "sub2" (ROM offsets 1 / 2 swapped).
+//  No LS259: the 34XX decodes 7000 / 7800 (main IRQ enable, data in A11), 8000 / 8800 (sub + sound CPU run, sound
+//  on), 9000 / 9800 (I/O run); sub CPU 6000-6FFF IRQ enable (A0), sound CPU 4000 / 6000 IRQ enable (A13). They set
+//  the same latch bits as the LS259. Sound RAM 6000, I/O 6800 / 6810 / 6820 (62XX: MAME's customio_3 behaviour,
+//  explosion not modelled yet), starfield control A000-A003, watchdog 7800 read (off: MAME has none). 99XX DAC.
+//
 //============================================================================
 
 module superpac_board
@@ -44,6 +51,7 @@ module superpac_board
     input  logic        pause,
     input  logic        mappy,                  // Mappy board deltas
     input  logic        phozon,                 // Phozon board deltas
+    input  logic        gaplus,                 // Gaplus board deltas
     input  logic  [7:0] opts,                   // index 1 byte 3: [0] no watchdog, [1] 256 sprites, [2] 64 sprite colours
     input  logic  [1:0] io_kind0,
     input  logic  [1:0] io_kind1,
@@ -118,10 +126,10 @@ module superpac_board
     output logic        xram_wa,
     input  logic  [7:0] xram_qa,
     output logic  [9:0] lbuf_aa,
-    output logic  [7:0] lbuf_da,
+    output logic  [8:0] lbuf_da,
     output logic        lbuf_wa,
     output logic  [9:0] lbuf_ab,
-    input  logic  [7:0] lbuf_qb,
+    input  logic  [8:0] lbuf_qb,
 
     input  logic [15:0] hs_address,
     input  logic  [7:0] hs_data_in,
@@ -146,8 +154,9 @@ wire fall_q  = (div == 5'd23) & ~pause_x;      // main CPU
 wire fall_e  = (div == 5'd31) & ~pause_x;
 wire sfall_q = (div == 5'd7)  & ~pause_x;      // sound CPU: opposite E phase
 wire sfall_e = (div == 5'd15) & ~pause_x;
-wire fall_q2 = (div == 5'd15) & ~pause_x & phozon;    // Phozon sub CPU: E falls at the end of ROM / RAM slot 2
-wire fall_e2 = (div == 5'd23) & ~pause_x & phozon;
+wire sub_on  = phozon | gaplus;                       // third 6809 fitted
+wire fall_q2 = (div == 5'd15) & ~pause_x & sub_on;    // Phozon / Gaplus sub CPU: E falls at the end of ROM / RAM slot 2
+wire fall_e2 = (div == 5'd23) & ~pause_x & sub_on;
 
 /////////////////////////////  Video  /////////////////////////////
 
@@ -162,7 +171,8 @@ logic [10:0] slut_a;
 logic [11:0] vid_vram_a;
 logic [10:0] vid_spr_a;
 logic  [9:0] v_lbuf_wa, v_lbuf_ra;
-logic  [7:0] v_lbuf_wd;
+logic  [8:0] v_lbuf_wd;
+logic [3:0][7:0] star_ctl = '0;
 logic        v_lbuf_we;
 logic  [8:0] hcnt, vcnt;
 logic  [7:0] main_rom_q, sub_rom_q, sub2_rom_q;
@@ -171,7 +181,7 @@ assign ce_pix = div[2:0] == 3'd7;
 
 superpac_video video
 (
-    .clk(clk), .div(div), .mappy(mappy), .phozon(phozon), .sprbig(opts[1]), .slut64(opts[2]), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
+    .clk(clk), .div(div), .mappy(mappy), .phozon(phozon), .gaplus(gaplus), .star_ctl(star_ctl), .sprbig(opts[1]), .slut64(opts[2]), .flip(flip), .crt_flip(crt_flip), .scroll(scroll), .h_adj(h_adj), .v_adj(v_adj),
     .hcnt(hcnt), .vcnt(vcnt), .vblank_start(vblank_start),
     .vram_a(vid_vram_a), .vram_q(vram_qb),
     .spr_a(vid_spr_a), .spr_q0(wram_qb[0]), .spr_q1(wram_qb[1]), .spr_q2(wram_qb[2]),
@@ -216,12 +226,17 @@ wire cs_vram  = bank == 3'd0;
 wire cs_wram0 = bank == 3'd1;
 wire cs_wram1 = bank == 3'd2;
 wire cs_wram2 = bank == 3'd3;
-wire cs_flip  = !mappy && !phozon && a[15:11] == 5'b00100;
+wire cs_flip  = !mappy && !phozon && !gaplus && a[15:11] == 5'b00100;
 wire cs_scrl  = mappy && a[15:11] == 5'b00111;
-wire cs_sram  = a[15:11] == 5'b01000;
-wire cs_io    = a[15:11] == 5'b01001;
-wire cs_latch = a[15:11] == 5'b01010;
-wire cs_wdr   = phozon ? a[15:11] == 5'b01110 : a[15:11] == 5'b10000;    // Phozon 7000
+wire cs_sram  = a[15:11] == (gaplus ? 5'b01100 : 5'b01000);            // Gaplus 6000
+wire cs_io    = a[15:11] == (gaplus ? 5'b01101 : 5'b01001);            // Gaplus 6800
+wire cs_latch = !gaplus && a[15:11] == 5'b01010;
+wire cs_wdr   = gaplus ? a[15:11] == 5'b01111 : phozon ? a[15:11] == 5'b01110 : a[15:11] == 5'b10000;    // 7800 / 7000
+wire wd_kick  = cs_wdr && (gaplus ? fall_e & rw : wr);                  // Gaplus: on read
+wire g_mirq   = gaplus && a[15:12] == 4'h7 && wr;                       // Gaplus 34XX writes (data in A11)
+wire g_sres   = gaplus && a[15:12] == 4'h8 && wr;
+wire g_fres   = gaplus && a[15:12] == 4'h9 && wr;
+wire g_star   = gaplus && a[15:11] == 5'b10100 && wr;
 wire cs_rom   = (mappy || phozon) ? a[15] : a[15:13] >= 3'b101;
 
 /////////////////////////////  Sound CPU  /////////////////////////////
@@ -232,7 +247,8 @@ wire        srw = m6809_1_o.rw;
 wire        swr = sfall_e & ~srw;
 
 wire scs_sram  = sa[15:13] == 3'b000;
-wire scs_latch = !phozon && sa[15:13] == 3'b001;
+wire scs_latch = !phozon && !gaplus && sa[15:13] == 3'b001;
+wire g_sirq    = gaplus && sa[15:14] == 2'b01 && swr;                  // Gaplus sound CPU IRQ enable (A13)
 wire scs_rom   = sa[15:13] == 3'b111;
 
 /////////////////////////////  Phozon sub CPU  /////////////////////////////
@@ -243,10 +259,11 @@ wire        rw2 = m6809_2_o.rw;
 wire        wr2 = fall_e2 & ~rw2;
 
 wire [2:0] bank2   = ram_bank(a2, 1'b0);       // tilemap / work RAM as the main CPU (Super Pac map)
-wire       s2_sram = a2[15:11] == 5'b01000;
-wire       s2_xram = a2[15:11] == 5'b10100;
-wire       s2_rom  = a2[15:13] == 3'b111;
-wire       slot2   = phozon && div[4:3] == 2'd2;   // RAM port A belongs to the sub CPU
+wire       s2_sram = phozon && a2[15:11] == 5'b01000;
+wire       s2_xram = phozon && a2[15:11] == 5'b10100;
+wire       s2_rom  = gaplus ? a2[15:13] >= 3'b101 : a2[15:13] == 3'b111;
+wire       g_s2irq = gaplus && a2[15:12] == 4'h6 && wr2;                // Gaplus sub CPU IRQ enable (A0)
+wire       slot2   = sub_on && div[4:3] == 2'd2;   // RAM port A belongs to the sub CPU
 
 /////////////////////////////  Watchdog, LS259, IRQs, flip  /////////////////////////////
 
@@ -261,7 +278,7 @@ always_ff @(posedge clk) begin
     end
     else begin
         if (wd_hold != 12'd0) wd_hold <= wd_hold - 12'd1;
-        if (cs_wdr && wr) wd_cnt <= 4'd0;
+        if (wd_kick) wd_cnt <= 4'd0;
         else if (vblank_start && !pause && !opts[0]) begin    // Dig Dug II / Druaga: no watchdog (MAME)
             if (wd_cnt == 4'd7) begin wd_cnt <= 4'd0; wd_hold <= 12'hFFF; end
             else wd_cnt <= wd_cnt + 4'd1;
@@ -283,36 +300,43 @@ assign flip = mappy ? latch[2] : sp_flip;
 logic       irq_m = 1'b0, irq_s = 1'b0, irq_s2 = 1'b0;
 always_ff @(posedge clk) begin
     if (cpu_rst) begin
-        latch   <= 8'h00;
-        sp_flip <= 1'b0;
+        latch    <= 8'h00;
+        sp_flip  <= 1'b0;
+        star_ctl <= '0;
     end
     else begin
         if (cs_latch && wr)   latch[a[3:1]]  <= a[0];
         if (scs_latch && swr) latch[sa[3:1]] <= sa[0];
         if (cs_flip && fall_e) sp_flip <= rw ? 1'b1 : do_[0];
         if (cs_scrl && wr)    scroll <= a[10:3];
+        if (g_mirq)  latch[1] <= ~a[11];
+        if (g_sres)  begin latch[3] <= ~a[11]; latch[5] <= ~a[11]; latch[6] <= ~a[11]; end
+        if (g_fres)  latch[4] <= ~a[11];
+        if (g_sirq)  latch[0] <= ~sa[13];
+        if (g_s2irq) latch[2] <= a2[0];
+        if (g_star)  star_ctl[a[1:0]] <= do_;
     end
     // IRQ on vblank while enabled, held until the enable bit is cleared
     if (cpu_rst || !latch[1]) irq_m <= 1'b0;
     else if (vblank_start)    irq_m <= 1'b1;
     if (cpu_rst || !latch[0]) irq_s <= 1'b0;
     else if (vblank_start)    irq_s <= 1'b1;
-    if (cpu_rst || !latch[2] || !phozon) irq_s2 <= 1'b0;
+    if (cpu_rst || !latch[2] || !sub_on) irq_s2 <= 1'b0;
     else if (vblank_start)               irq_s2 <= 1'b1;
 end
 
 /////////////////////////////  ROM store port A slots  /////////////////////////////
 
 wire [16:0] main_pk = {1'b0, a}  + rom_ofs[0];
-wire [16:0] sub_pk  = {1'b0, sa} + rom_ofs[1];
-wire [16:0] sub2_pk = {1'b0, a2} + rom_ofs[2];
+wire [16:0] sub_pk  = {1'b0, sa} + (gaplus ? rom_ofs[2] : rom_ofs[1]);    // Gaplus: sound CPU = MAME "sub2"
+wire [16:0] sub2_pk = {1'b0, a2} + (gaplus ? rom_ofs[1] : rom_ofs[2]);
 wire [16:0] tile_pk = {4'd0, tile_rom_a} + rom_ofs[3];
 
 always_ff @(posedge clk) begin
     case (div[4:3])
         2'd0:    rom_a_addr <= tile_pk;        // video reads at div 6
         2'd1:    rom_a_addr <= sub_pk;
-        2'd2:    rom_a_addr <= phozon ? sub2_pk : main_pk;
+        2'd2:    rom_a_addr <= sub_on ? sub2_pk : main_pk;
         default: rom_a_addr <= main_pk;
     endcase
     rom_b_addr <= {2'd0, spr_rom_a} + rom_ofs[4];
@@ -352,9 +376,10 @@ always_comb begin
 end
 
 // sound RAM: main CPU (Phozon: + sub CPU in slot 2) on port A, sound CPU on port B
-assign sram_aa = slot2 ? a2[9:0] : a[9:0];
-assign sram_da = slot2 ? do2 : do_;
-assign sram_wa = slot2 ? s2_sram && wr2 : cs_sram && wr;
+wire   slot2s  = slot2 && phozon;                  // only Phozon's sub CPU reaches the sound RAM
+assign sram_aa = slot2s ? a2[9:0] : a[9:0];
+assign sram_da = slot2s ? do2 : do_;
+assign sram_wa = slot2s ? s2_sram && wr2 : cs_sram && wr;
 assign sram_ab = sa[9:0];
 assign sram_db = sdo;
 assign sram_wb = scs_sram && swr;
@@ -373,7 +398,7 @@ assign wsg_smp = smp_div == 11'd0 && !pause;   // 24 kHz
 wire wsg_mw = cs_sram && wr && a[9:6] == 4'd0;
 wire wsg_2w = s2_sram && wr2 && a2[9:6] == 4'd0;
 assign wsg_i.sound_en = latch[3];
-assign wsg_i.dac_mode = (mappy || phozon) ? 2'd1 : 2'd0;    // 99XX : LS273 + 4066 ladder
+assign wsg_i.dac_mode = (mappy || phozon || gaplus) ? 2'd1 : 2'd0;    // 99XX : LS273 + 4066 ladder
 assign wsg_i.reg_wr   = wsg_mw || wsg_2w || (scs_sram && swr && sa[9:6] == 4'd0);
 assign wsg_i.reg_addr = wsg_mw ? a[5:0] : wsg_2w ? a2[5:0] : sa[5:0];
 assign wsg_i.reg_din  = wsg_mw ? do_ : wsg_2w ? do2 : sdo;
@@ -406,7 +431,23 @@ assign io1_i.run     = io_run;
 assign io1_i.wr      = io_wr1;
 assign io1_i.addr    = a[3:0];
 assign io1_i.din     = do_[3:0];
-assign io1_i.in      = {dsw0[3:0], dsw1[7:4], dsw1[3:0], io1_o.out[0] ? dsw2[7:4] : dsw2[3:0]};
+// Gaplus #1: DSWA high, DSWB low, DSWB high, DSWA low (MAME; DSW0 = DSWA, DSW1 = DSWB)
+assign io1_i.in      = {dsw0[3:0], dsw1[7:4], dsw1[3:0], gaplus ? dsw0[7:4] : io1_o.out[0] ? dsw2[7:4] : dsw2[3:0]};
+
+// Gaplus 62XX at 6820 (MAME customio_3): 16 bytes of RAM; 0 = IN2 (DSW2 bits 3-0), 1-3 depend on the mode (byte 8)
+logic [15:0][7:0] cio3 = '0;
+always_ff @(posedge clk) if (gaplus && cs_io && wr && a[5:4] == 2'd2) cio3[a[3:0]] <= do_;
+wire  cio3_m2 = cio3[8] == 8'd2;
+logic [7:0] cio3_q;
+always_comb begin
+    case (a[3:0])
+        4'd0:    cio3_q = {4'h0, dsw2[3:0]};
+        4'd1:    cio3_q = cio3_m2 ? cio3[1] : 8'h0F;
+        4'd2:    cio3_q = cio3_m2 ? 8'h0F : 8'h0E;
+        4'd3:    cio3_q = cio3_m2 ? cio3[3] : 8'h01;
+        default: cio3_q = cio3[a[3:0]];
+    endcase
+end
 
 /////////////////////////////  CPU buses  /////////////////////////////
 
@@ -418,7 +459,7 @@ always_comb begin
     else if (cs_wram1) main_di = wram_qa[1];
     else if (cs_wram2) main_di = wram_qa[2];
     else if (cs_sram)  main_di = sram_qa;
-    else if (cs_io)    main_di = a[5] ? 8'hFF : {4'hF, a[4] ? io1_o.dout : io0_o.dout};
+    else if (cs_io)    main_di = (gaplus && a[5:4] == 2'd2) ? cio3_q : a[5] ? 8'hFF : {4'hF, a[4] ? io1_o.dout : io0_o.dout};
     else               main_di = 8'hFF;
 end
 wire [7:0] sub_di = scs_rom ? sub_rom_q : scs_sram ? sram_qb : 8'hFF;
@@ -451,7 +492,7 @@ assign m6809_1_i.firq_n  = 1'b1;
 assign m6809_1_i.nmi_n   = 1'b1;
 assign m6809_1_i.d       = sub_di;
 
-assign m6809_2_i.reset_n = ~cpu_rst & latch[6] & phozon;
+assign m6809_2_i.reset_n = ~cpu_rst & latch[6] & sub_on;
 assign m6809_2_i.fall_e  = fall_e2;
 assign m6809_2_i.fall_q  = fall_q2;
 assign m6809_2_i.irq_n   = ~irq_s2;

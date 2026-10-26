@@ -238,12 +238,12 @@ dpram_dc #(.widthad_a(11)) mcu62_rom
 //   wram[3] 3x2K work RAM with embedded sprite registers (x780-x7FF of each: number/colour, x/y, x-msb/flip/size)
 //   xram    2K   Phozon sub2 private RAM (A000-A7FF)
 //   sram    1K   15XX shared sound RAM (registers = first 64 bytes)
-//   lbuf    1K   sprite line buffer, ping-pong by line parity (2 x 512 x 8)
+//   lbuf    1K   sprite line buffer, ping-pong by line parity (2 x 512 x 9; bit 8 = Gaplus star)
 // Port A = CPU side (board arbitrates its CPUs), port B = video side / hiscore.
 logic [11:0] vram_aa, vram_ab;  logic [7:0] vram_da, vram_qa, vram_qb;  logic vram_wa;
 logic [10:0] xram_aa;           logic [7:0] xram_da, xram_qa;           logic xram_wa;
 logic  [9:0] sram_aa, sram_ab;  logic [7:0] sram_da, sram_db, sram_qa, sram_qb;  logic sram_wa, sram_wb;
-logic  [9:0] lbuf_aa, lbuf_ab;  logic [7:0] lbuf_da, lbuf_qa, lbuf_qb;  logic lbuf_wa;
+logic  [9:0] lbuf_aa, lbuf_ab;  logic [8:0] lbuf_da, lbuf_qa, lbuf_qb;  logic lbuf_wa;
 logic [10:0] wram_aa[3], wram_ab[3];
 logic  [7:0] wram_da[3], wram_qa[3], wram_qb[3];
 logic        wram_wa[3];
@@ -285,22 +285,21 @@ dpram_dc #(.widthad_a(10)) sram
     .clock_a(clk), .address_a(sram_aa), .data_a(sram_da), .wren_a(sram_wa), .byteena_a(1'b1), .q_a(sram_qa),
     .clock_b(clk), .address_b(sram_ab), .data_b(sram_db), .wren_b(sram_wb), .byteena_b(1'b1), .q_b(sram_qb)
 );
-dpram_dc #(.widthad_a(10)) lbuf
+dpram_dc #(.widthad_a(10), .width_a(9)) lbuf      // 9 bits: Gaplus star flag (1K x 9 = one M10K, as 1K x 8)
 (
     .clock_a(clk), .address_a(lbuf_aa), .data_a(lbuf_da), .wren_a(lbuf_wa), .byteena_a(1'b1), .q_a(lbuf_qa),
-    .clock_b(clk), .address_b(lbuf_ab), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(lbuf_qb)
+    .clock_b(clk), .address_b(lbuf_ab), .data_b(9'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(lbuf_qb)
 );
 
 /////////////////////////////  Boards  /////////////////////////////
 
-// Super Pac-Man (variant 0), Phozon (variant 1) and Mappy (variant 2) boards: one module, deltas gated.
-// Gaplus: not written yet (black, silent).
+// Super Pac-Man (variant 0), Phozon (variant 1), Mappy (variant 2) and Gaplus (variant 3) boards: one module, deltas gated.
 logic [7:0] sp_r, sp_g, sp_b, sp_hs_q;
 logic       sp_hs, sp_vs, sp_hb, sp_vb;
 
 superpac_board superpac
 (
-    .clk(clk), .reset(reset | ~(is_sp | is_ph | is_mp)), .pause(pause), .mappy(is_mp), .phozon(is_ph), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
+    .clk(clk), .reset(reset | ~(is_sp | is_ph | is_mp | is_gp)), .pause(pause), .mappy(is_mp), .phozon(is_ph), .gaplus(is_gp), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
     .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
     .in_coins(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_buttons(in_buttons), .dsw0(dsw0), .dsw1(dsw1), .dsw2(dsw2),
     .ce_pix(ce_pix), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),
@@ -321,9 +320,9 @@ superpac_board superpac
     .hs_address(hs_address), .hs_data_in(hs_data_in), .hs_data_out(sp_hs_q), .hs_write(hs_write)
 );
 
-assign {video_r, video_g, video_b} = (is_sp | is_ph | is_mp) ? {sp_r, sp_g, sp_b} : 24'd0;
+assign {video_r, video_g, video_b} = (is_sp | is_ph | is_mp | is_gp) ? {sp_r, sp_g, sp_b} : 24'd0;
 assign {video_hs, video_vs, video_hblank, video_vblank} = {sp_hs, sp_vs, sp_hb, sp_vb};
-assign audio       = (is_sp | is_ph | is_mp) ? wsg15_0_o.sound : 16'sd0;
-assign hs_data_out = (is_sp | is_ph | is_mp) ? sp_hs_q : 8'd0;
+assign audio       = (is_sp | is_ph | is_mp | is_gp) ? wsg15_0_o.sound : 16'sd0;
+assign hs_data_out = (is_sp | is_ph | is_mp | is_gp) ? sp_hs_q : 8'd0;
 
 endmodule
