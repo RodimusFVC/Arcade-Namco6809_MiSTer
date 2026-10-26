@@ -1,6 +1,6 @@
 //============================================================================
 //
-//  Namco6809 — board top (dispatcher). SKELETON: pools only, no board logic yet (setup 2026-10-24).
+//  Namco6809 — board top (dispatcher): shared CPU / sound / ROM / RAM pools and the two board modules.
 //  Copyright (C) 2026 Rodimus
 //
 //  One rbf for the Namco 6809 / 15XX family (MAME namco/mappy.cpp + gaplus.cpp). Variant (MRA index 1 byte 0):
@@ -8,6 +8,7 @@
 //    1  Phozon board         (phozon, phozons)                       third 6809, 8x8 sprites, RGB PROMs
 //    2  Mappy board          (mappy, mappyj, todruaga*, digdug2*, motos)   17XX scroll, 4bpp sprites, 99XX DAC
 //    3  Gaplus board         (gaplus*, galaga3*)                      3x 6809, CUS26 stars, 62XX (MB8843)
+//    4  Sky Kid board        (skykid*, drgnbstr; skykid.cpp)          6809 + HD63701 MCU, CUS30, scroll + text layers
 //  The board not selected is held in reset. Boards come later as rtl/boards/<board>_board.sv and drive the pools
 //  below through bus ports (rtl/chip_pool_pkg.sv); they never instance their own CPU / WSG / ROM / RAM.
 //
@@ -17,7 +18,8 @@
 //                     (rom_ofs; regions 0 maincpu, 1 sub, 2 sub2, 3 tiles, 4 sprites; MAME ROM_FILLs not stored)
 //    0x18000-0x187FF  colour PROMs (MAME "proms" region as dumped; decoded on read per variant)
 //    0x18800-0x188FF  15XX waveform PROM (MAME "namco")
-//    0x19000-0x197FF  62XX MCU ROM (namco62.zip, Gaplus only)
+//    0x19000-0x1CFFF  MCU ROM block, 16K: Gaplus 62XX (namco62.zip) at 0000-07FF; Sky Kid HD63701 sub program
+//                     ("mcusub", CPU 8000-9FFF) at 0000-1FFF and internal ROM ("mcu", CPU F000-FFFF) at 3000-3FFF
 //
 //============================================================================
 
@@ -69,6 +71,7 @@ wire is_sp = variant == 8'd0;
 wire is_ph = variant == 8'd1;
 wire is_mp = variant == 8'd2;
 wire is_gp = variant == 8'd3;
+wire is_sk = variant == 8'd4;
 /* verilator lint_on UNUSED */
 
 // 6.144 MHz pixel strobe (18.432 MHz / 3 on the PCB; 49.152 / 8 here): from the board's free-running divider, which
@@ -84,8 +87,8 @@ wire is_gp = variant == 8'd3;
 chip_pool_pkg::m6809r_i_t m6809_i[3];
 chip_pool_pkg::m6809r_o_t m6809_o[3];
 
-chip_pool_pkg::m6809r_i_t sp_m6809_0_i, sp_m6809_1_i, sp_m6809_2_i;
-assign m6809_i[0] = sp_m6809_0_i;
+chip_pool_pkg::m6809r_i_t sp_m6809_0_i, sp_m6809_1_i, sp_m6809_2_i, sk_m6809_0_i;
+assign m6809_i[0] = is_sk ? sk_m6809_0_i : sp_m6809_0_i;
 assign m6809_i[1] = sp_m6809_1_i;
 assign m6809_i[2] = sp_m6809_2_i;            // Phozon sub CPU (Gaplus: later)
 
@@ -127,8 +130,8 @@ endgenerate
 // copy without ram_clr); ram_clr tied off: this board has no MCU power-on RAM sweep.
 chip_pool_pkg::mb88_i_t mb88_0_i;
 chip_pool_pkg::mb88_o_t mb88_0_o;
-logic  [7:0] mcu62_q;                        // 62XX ROM (mcu62_rom below)
-chip_pool_pkg::mb88_i_t sp_mb88_i;           // driven by the board (Gaplus 62XX), ROM from mcu62_rom
+logic  [7:0] mcu_rom_q;                      // MCU ROM block (below)
+chip_pool_pkg::mb88_i_t sp_mb88_i;           // driven by the board (Gaplus 62XX), ROM from the MCU ROM block
 assign mb88_0_i.ena     = sp_mb88_i.ena;
 assign mb88_0_i.reset_n = sp_mb88_i.reset_n;
 assign mb88_0_i.k       = sp_mb88_i.k;
@@ -136,7 +139,7 @@ assign mb88_0_i.r_in    = sp_mb88_i.r_in;
 assign mb88_0_i.irq_n   = sp_mb88_i.irq_n;
 assign mb88_0_i.tc_n    = sp_mb88_i.tc_n;
 assign mb88_0_i.si_n    = sp_mb88_i.si_n;
-assign mb88_0_i.rom_d   = mcu62_q;
+assign mb88_0_i.rom_d   = mcu_rom_q;
 
 wire  [3:0] mb88_r0, mb88_r1, mb88_r2, mb88_r3, mb88_ol, mb88_oh, mb88_p;
 wire        mb88_owr;
@@ -158,6 +161,35 @@ assign mb88_0_o.o_wr  = mb88_owr;
 assign mb88_0_o.p     = mb88_p;
 assign mb88_0_o.rom_a = mb88_rom_a;
 
+// HD63701 x1: Sky Kid MCU. jotego jtframe_6801mcu + jt680x (jtcores, GPL; 6301 microcode generated into
+// rtl/cpu/jt680x/6801.*), mode 6: ROM external (MCU ROM block), crystal clock enable from the board.
+logic        sk_mcu_rst, sk_mcu_cen, sk_mcu_irq, mcu_wr, mcu_xcs;
+logic  [7:0] sk_mcu_xdin, sk_mcu_p1_din, mcu_dout, mcu_p1_dout;
+logic [15:0] mcu_addr;
+jtframe_6801mcu #(.ROMW(12), .MODEL("HD63701V")) mcu63
+(
+    .rst(reset | ~is_sk | sk_mcu_rst), .clk(clk), .cen(sk_mcu_cen), .cen_tmr(sk_mcu_cen),
+    .irq(sk_mcu_irq), .nmi(1'b0),
+    .addr(mcu_addr), .xdin(sk_mcu_xdin), .dout(mcu_dout), .wr(mcu_wr), .x_cs(mcu_xcs), .ba(),
+    .p1_din(sk_mcu_p1_din), .p3_din(8'hFF), .p4_din(8'hFF), .p1_dout(mcu_p1_dout), .p3_dout(), .p4_dout(),
+    .p2_din(5'h1F), .p2_dout(),
+    .rom_addr(), .rom_data(mcu_rom_q), .rom_cs()
+);
+
+// CUS30 x1: Sky Kid sound. jotego jtcus30 (jtcores, GPL; waveform / register RAM inside, two CPU buses by bsel)
+logic        sk_c30_cen, sk_c30_bsel, sk_c30_bcs, sk_c30_brnw, sk_c30_scs, sk_c30_srnw;
+logic  [9:0] sk_c30_baddr;
+logic  [7:0] sk_c30_bdout, sk_c30_sdout, c30_xdin;
+logic [15:0] sk_c30_saddr;
+logic signed [12:0] c30_snd;
+jtcus30 c30
+(
+    .rst(reset | ~is_sk), .clk(clk), .bsel(sk_c30_bsel), .cen(sk_c30_cen), .xdin(c30_xdin),
+    .bcs(sk_c30_bcs), .brnw(sk_c30_brnw), .baddr(sk_c30_baddr), .bdout(sk_c30_bdout),
+    .scs(sk_c30_scs), .srnw(sk_c30_srnw), .saddr(sk_c30_saddr), .sdout(sk_c30_sdout),
+    .sample(), .snd_l(c30_snd), .snd_r(), .debug_bus(8'd0)
+);
+
 /////////////////////////////  Shared ROM blocks  /////////////////////////////
 
 // Packed store: 12 x 8K banks = 96K (max per-set total of the five regions: Gaplus 0x18000). Linear load,
@@ -167,9 +199,11 @@ assign mb88_0_o.rom_a = mb88_rom_a;
 // Same latency as one RAM: the bank select is registered alongside the address.
 localparam NBANK = 12;
 
-logic [16:0] rom_a_addr, rom_b_addr;
+logic [16:0] rom_a_addr, rom_b_addr, sp_rom_a_addr, sp_rom_b_addr, sk_rom_a_addr, sk_rom_b_addr;
 logic  [7:0] rom_a_q, rom_b_q;
 // driven by the board (region address + rom_ofs[region])
+assign rom_a_addr = is_sk ? sk_rom_a_addr : sp_rom_a_addr;
+assign rom_b_addr = is_sk ? sk_rom_b_addr : sp_rom_b_addr;
 
 wire        ld_pack = ioctl_wr0 && ioctl_addr < 25'h18000;
 logic [3:0] rd_bank_a, rd_bank_b;
@@ -201,20 +235,25 @@ endgenerate
 assign rom_a_q = bank_qa[rd_bank_a];
 assign rom_b_q = bank_qb[rd_bank_b];
 
-// Colour PROMs (2K window: port B, and port A once loaded), 15XX waveform PROM, 62XX MCU ROM: fixed windows
-logic [10:0] prom_addr, prom_a_addr;
+// Colour PROMs (2K window: port B, and port A once loaded), 15XX waveform PROM, MCU ROM block: fixed windows
+logic [10:0] prom_addr, prom_a_addr, sp_prom_addr, sp_prom_a_addr, sk_prom_addr, sk_prom_a_addr;
 logic  [7:0] wave_addr;
-logic [10:0] mcu62_addr;
+logic [13:0] mcu_rom_addr;
+assign prom_addr   = is_sk ? sk_prom_addr : sp_prom_addr;
+assign prom_a_addr = is_sk ? sk_prom_a_addr : sp_prom_a_addr;
 logic  [7:0] prom_q, prom_a_q;
 /* verilator lint_off UNUSED */
 logic  [7:0] wave_q;
 /* verilator lint_on UNUSED */
 assign wave_addr  = wsg15_0_o.wave_a;
-assign mcu62_addr = mb88_0_o.rom_a;
+// HD63701: sub ROM 8000-9FFF at 0000, internal ROM F000-FFFF at 3000; 62XX: 0000-07FF
+assign mcu_rom_addr = !is_sk ? {3'd0, mb88_0_o.rom_a} :
+                      (mcu_addr[15:12] == 4'hF) ? {2'b11, mcu_addr[11:0]} : {1'b0, mcu_addr[12:0]};
 
 wire ld_prom  = ioctl_wr0 && ioctl_addr[24:11] == 14'(25'h18000 >> 11);
 wire ld_wave  = ioctl_wr0 && ioctl_addr[24:8]  == 17'(25'h18800 >> 8);
-wire ld_mcu62 = ioctl_wr0 && ioctl_addr[24:11] == 14'(25'h19000 >> 11);
+wire ld_mcu   = ioctl_wr0 && ioctl_addr >= 25'h19000 && ioctl_addr < 25'h1D000;
+wire [24:0] mcu_ld_a = ioctl_addr - 25'h19000;
 
 dpram_dc #(.widthad_a(11)) prom_ram
 (
@@ -227,10 +266,10 @@ dpram_dc #(.widthad_a(8)) wave_rom
     .clock_a(clk), .address_a(ioctl_addr[7:0]), .data_a(ioctl_dout), .wren_a(ld_wave), .byteena_a(1'b1), .q_a(),
     .clock_b(clk), .address_b(wave_addr), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(wave_q)
 );
-dpram_dc #(.widthad_a(11)) mcu62_rom
+dpram_dc #(.widthad_a(14)) mcu_rom
 (
-    .clock_a(clk), .address_a(ioctl_addr[10:0]), .data_a(ioctl_dout), .wren_a(ld_mcu62), .byteena_a(1'b1), .q_a(),
-    .clock_b(clk), .address_b(mcu62_addr), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(mcu62_q)
+    .clock_a(clk), .address_a(mcu_ld_a[13:0]), .data_a(ioctl_dout), .wren_a(ld_mcu), .byteena_a(1'b1), .q_a(),
+    .clock_b(clk), .address_b(mcu_rom_addr), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(mcu_rom_q)
 );
 
 /////////////////////////////  Shared RAM pool  /////////////////////////////
@@ -238,23 +277,48 @@ dpram_dc #(.widthad_a(11)) mcu62_rom
 // Sizes = max over the sets (MAME memory maps):
 //   vram    4K   tilemap RAM (Mappy family 0000-0FFF code+colour; Super Pac / Phozon / Gaplus use 2K)
 //   wram[3] 3x2K work RAM with embedded sprite registers (x780-x7FF of each: number/colour, x/y, x-msb/flip/size)
-//   xram    2K   Phozon sub2 private RAM (A000-A7FF)
-//   sram    1K   15XX shared sound RAM (registers = first 64 bytes)
+//   xram    2K   Phozon sub2 private RAM (A000-A7FF); Sky Kid text RAM (4000-47FF, port B = video)
+//   sram    2K   15XX shared sound RAM (registers = first 64 bytes; 1K); Sky Kid MCU RAM (C000-C7FF)
 //   lbuf    1K   sprite line buffer, ping-pong by line parity (2 x 512 x 9; bit 8 = Gaplus star)
 // Port A = CPU side (board arbitrates its CPUs), port B = video side / hiscore.
 logic [11:0] vram_aa, vram_ab;  logic [7:0] vram_da, vram_qa, vram_qb;  logic vram_wa;
-logic [10:0] xram_aa;           logic [7:0] xram_da, xram_qa;           logic xram_wa;
-logic  [9:0] sram_aa, sram_ab;  logic [7:0] sram_da, sram_db, sram_qa, sram_qb;  logic sram_wa, sram_wb;
+logic [10:0] xram_aa, xram_ab;  logic [7:0] xram_da, xram_qa, xram_qb;  logic xram_wa;
+logic [10:0] sram_aa, sram_ab;  logic [7:0] sram_da, sram_db, sram_qa, sram_qb;  logic sram_wa, sram_wb;
 logic  [9:0] lbuf_aa, lbuf_ab;  logic [8:0] lbuf_da, lbuf_qa, lbuf_qb;  logic lbuf_wa;
+
+// board-side nets, muxed onto the pools by variant
+logic [11:0] sp_vram_aa, sp_vram_ab, sk_vram_aa, sk_vram_ab;  logic [7:0] sp_vram_da, sk_vram_da;  logic sp_vram_wa, sk_vram_wa;
+logic [10:0] sp_xram_aa, sk_xram_aa, sk_xram_ab;              logic [7:0] sp_xram_da, sk_xram_da;  logic sp_xram_wa, sk_xram_wa;
+logic  [9:0] sp_sram_aa, sp_sram_ab;  logic [10:0] sk_sram_aa;
+logic  [7:0] sp_sram_da, sp_sram_db, sk_sram_da;              logic sp_sram_wa, sp_sram_wb, sk_sram_wa;
+logic  [9:0] sp_lbuf_aa, sp_lbuf_ab, sk_lbuf_aa, sk_lbuf_ab;  logic [8:0] sp_lbuf_da, sk_lbuf_da;  logic sp_lbuf_wa, sk_lbuf_wa;
+assign vram_aa = is_sk ? sk_vram_aa : sp_vram_aa;
+assign vram_da = is_sk ? sk_vram_da : sp_vram_da;
+assign vram_wa = is_sk ? sk_vram_wa : sp_vram_wa;
+assign vram_ab = is_sk ? sk_vram_ab : sp_vram_ab;
+assign xram_aa = is_sk ? sk_xram_aa : sp_xram_aa;
+assign xram_da = is_sk ? sk_xram_da : sp_xram_da;
+assign xram_wa = is_sk ? sk_xram_wa : sp_xram_wa;
+assign xram_ab = sk_xram_ab;
+assign sram_aa = is_sk ? sk_sram_aa : {1'b0, sp_sram_aa};
+assign sram_da = is_sk ? sk_sram_da : sp_sram_da;
+assign sram_wa = is_sk ? sk_sram_wa : sp_sram_wa;
+assign sram_ab = {1'b0, sp_sram_ab};
+assign sram_db = sp_sram_db;
+assign sram_wb = !is_sk && sp_sram_wb;
+assign lbuf_aa = is_sk ? sk_lbuf_aa : sp_lbuf_aa;
+assign lbuf_da = is_sk ? sk_lbuf_da : sp_lbuf_da;
+assign lbuf_wa = is_sk ? sk_lbuf_wa : sp_lbuf_wa;
+assign lbuf_ab = is_sk ? sk_lbuf_ab : sp_lbuf_ab;
 logic [10:0] wram_aa[3], wram_ab[3];
 logic  [7:0] wram_da[3], wram_qa[3], wram_qb[3];
 logic        wram_wa[3];
 
 // driven by the board (xram: Phozon sub CPU private RAM)
-logic [2:0][10:0] sp_wram_aa;
-logic [2:0] [7:0] sp_wram_da, sp_wram_qa, sp_wram_qb;
-logic [2:0]       sp_wram_wa;
-logic      [10:0] sp_wram_ab;
+logic [2:0][10:0] sp_wram_aa, sk_wram_aa;
+logic [2:0] [7:0] sp_wram_da, sp_wram_qa, sp_wram_qb, sk_wram_da;
+logic [2:0]       sp_wram_wa, sk_wram_wa;
+logic      [10:0] sp_wram_ab, sk_wram_ab;
 
 dpram_dc #(.widthad_a(12)) vram
 (
@@ -263,10 +327,10 @@ dpram_dc #(.widthad_a(12)) vram
 );
 generate
     for (ci = 0; ci < 3; ci = ci + 1) begin : g_wram
-        assign wram_aa[ci] = sp_wram_aa[ci];
-        assign wram_ab[ci] = sp_wram_ab;
-        assign wram_da[ci] = sp_wram_da[ci];
-        assign wram_wa[ci] = sp_wram_wa[ci];
+        assign wram_aa[ci] = is_sk ? sk_wram_aa[ci] : sp_wram_aa[ci];
+        assign wram_ab[ci] = is_sk ? sk_wram_ab : sp_wram_ab;
+        assign wram_da[ci] = is_sk ? sk_wram_da[ci] : sp_wram_da[ci];
+        assign wram_wa[ci] = is_sk ? sk_wram_wa[ci] : sp_wram_wa[ci];
         assign sp_wram_qa[ci] = wram_qa[ci];
         assign sp_wram_qb[ci] = wram_qb[ci];
         dpram_dc #(.widthad_a(11)) wram
@@ -280,9 +344,9 @@ endgenerate
 dpram_dc #(.widthad_a(11)) xram
 (
     .clock_a(clk), .address_a(xram_aa), .data_a(xram_da), .wren_a(xram_wa), .byteena_a(1'b1), .q_a(xram_qa),
-    .clock_b(clk), .address_b(11'd0), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b()
+    .clock_b(clk), .address_b(xram_ab), .data_b(8'd0), .wren_b(1'b0), .byteena_b(1'b1), .q_b(xram_qb)
 );
-dpram_dc #(.widthad_a(10)) sram
+dpram_dc #(.widthad_a(11)) sram
 (
     .clock_a(clk), .address_a(sram_aa), .data_a(sram_da), .wren_a(sram_wa), .byteena_a(1'b1), .q_a(sram_qa),
     .clock_b(clk), .address_b(sram_ab), .data_b(sram_db), .wren_b(sram_wb), .byteena_b(1'b1), .q_b(sram_qb)
@@ -296,41 +360,69 @@ dpram_dc #(.widthad_a(10), .width_a(9)) lbuf      // 9 bits: Gaplus star flag (1
 /////////////////////////////  Boards  /////////////////////////////
 
 // Super Pac-Man (variant 0), Phozon (variant 1), Mappy (variant 2) and Gaplus (variant 3) boards: one module, deltas gated.
-logic [7:0] sp_r, sp_g, sp_b, sp_hs_q;
-logic       sp_hs, sp_vs, sp_hb, sp_vb;
+logic [7:0] sp_r, sp_g, sp_b, sp_hs_q, sk_r, sk_g, sk_b, sk_hs_q;
+logic       sp_hs, sp_vs, sp_hb, sp_vb, sp_ce, sk_hs, sk_vs, sk_hb, sk_vb, sk_ce;
 
 superpac_board superpac
 (
     .clk(clk), .reset(reset | ~(is_sp | is_ph | is_mp | is_gp)), .pause(pause), .mappy(is_mp), .phozon(is_ph), .gaplus(is_gp), .opts(game_cfg[3]), .io_kind0(game_cfg[2][1:0]), .io_kind1(game_cfg[2][3:2]),
     .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
     .in_coins(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_buttons(in_buttons), .dsw0(dsw0), .dsw1(dsw1), .dsw2(dsw2),
-    .ce_pix(ce_pix), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),
+    .ce_pix(sp_ce), .video_r(sp_r), .video_g(sp_g), .video_b(sp_b), .video_hs(sp_hs), .video_vs(sp_vs),
     .video_hblank(sp_hb), .video_vblank(sp_vb),
     .m6809_0_i(sp_m6809_0_i), .m6809_0_o(m6809_o[0]), .m6809_1_i(sp_m6809_1_i), .m6809_1_o(m6809_o[1]),
     .m6809_2_i(sp_m6809_2_i), .m6809_2_o(m6809_o[2]),
     .wsg_i(wsg15_0_i), .wsg_smp(wsg15_0_smp),
     .io0_i(namcoio_i[0]), .io0_o(namcoio_o[0]), .io1_i(namcoio_i[1]), .io1_o(namcoio_o[1]),
     .mb88_i(sp_mb88_i), .mb88_o(mb88_0_o),
-    .rom_a_addr(rom_a_addr), .rom_a_q(rom_a_q), .rom_b_addr(rom_b_addr), .rom_b_q(rom_b_q),
-    .prom_a_addr(prom_a_addr), .prom_a_q(prom_a_q), .prom_b_addr(prom_addr), .prom_b_q(prom_q), .wave_q(wave_q[3:0]),
-    .vram_aa(vram_aa), .vram_da(vram_da), .vram_wa(vram_wa), .vram_qa(vram_qa), .vram_ab(vram_ab), .vram_qb(vram_qb),
+    .rom_a_addr(sp_rom_a_addr), .rom_a_q(rom_a_q), .rom_b_addr(sp_rom_b_addr), .rom_b_q(rom_b_q),
+    .prom_a_addr(sp_prom_a_addr), .prom_a_q(prom_a_q), .prom_b_addr(sp_prom_addr), .prom_b_q(prom_q), .wave_q(wave_q[3:0]),
+    .vram_aa(sp_vram_aa), .vram_da(sp_vram_da), .vram_wa(sp_vram_wa), .vram_qa(vram_qa), .vram_ab(sp_vram_ab), .vram_qb(vram_qb),
     .wram_aa(sp_wram_aa), .wram_da(sp_wram_da), .wram_wa(sp_wram_wa), .wram_qa(sp_wram_qa), .wram_ab(sp_wram_ab),
     .wram_qb(sp_wram_qb),
-    .sram_aa(sram_aa), .sram_da(sram_da), .sram_wa(sram_wa), .sram_qa(sram_qa),
-    .sram_ab(sram_ab), .sram_db(sram_db), .sram_wb(sram_wb), .sram_qb(sram_qb),
-    .xram_aa(xram_aa), .xram_da(xram_da), .xram_wa(xram_wa), .xram_qa(xram_qa),
-    .lbuf_aa(lbuf_aa), .lbuf_da(lbuf_da), .lbuf_wa(lbuf_wa), .lbuf_ab(lbuf_ab), .lbuf_qb(lbuf_qb),
+    .sram_aa(sp_sram_aa), .sram_da(sp_sram_da), .sram_wa(sp_sram_wa), .sram_qa(sram_qa),
+    .sram_ab(sp_sram_ab), .sram_db(sp_sram_db), .sram_wb(sp_sram_wb), .sram_qb(sram_qb),
+    .xram_aa(sp_xram_aa), .xram_da(sp_xram_da), .xram_wa(sp_xram_wa), .xram_qa(xram_qa),
+    .lbuf_aa(sp_lbuf_aa), .lbuf_da(sp_lbuf_da), .lbuf_wa(sp_lbuf_wa), .lbuf_ab(sp_lbuf_ab), .lbuf_qb(lbuf_qb),
     .hs_address(hs_address), .hs_data_in(hs_data_in), .hs_data_out(sp_hs_q), .hs_write(hs_write)
 );
 
-assign {video_r, video_g, video_b} = (is_sp | is_ph | is_mp | is_gp) ? {sp_r, sp_g, sp_b} : 24'd0;
-assign {video_hs, video_vs, video_hblank, video_vblank} = {sp_hs, sp_vs, sp_hb, sp_vb};
+// Sky Kid board (variant 4)
+skykid_board skykid
+(
+    .clk(clk), .reset(reset | ~is_sk), .pause(pause), .rom_ofs(rom_ofs), .crt_flip(crt_flip), .h_adj(h_adj), .v_adj(v_adj),
+    .in_system(in_coins), .in_p1(in_p1), .in_p2(in_p2), .in_button2(in_buttons), .dswa(dsw0), .dswb(dsw1), .dsw2(dsw2),
+    .ce_pix(sk_ce), .video_r(sk_r), .video_g(sk_g), .video_b(sk_b), .video_hs(sk_hs), .video_vs(sk_vs),
+    .video_hblank(sk_hb), .video_vblank(sk_vb),
+    .m6809_0_i(sk_m6809_0_i), .m6809_0_o(m6809_o[0]),
+    .mcu_rst(sk_mcu_rst), .mcu_cen(sk_mcu_cen), .mcu_irq(sk_mcu_irq), .mcu_xdin(sk_mcu_xdin), .mcu_p1_din(sk_mcu_p1_din),
+    .mcu_addr(mcu_addr), .mcu_dout(mcu_dout), .mcu_wr(mcu_wr), .mcu_xcs(mcu_xcs), .mcu_p1_dout(mcu_p1_dout),
+    .mcu_rom_q(mcu_rom_q),
+    .c30_cen(sk_c30_cen), .c30_bsel(sk_c30_bsel), .c30_bcs(sk_c30_bcs), .c30_brnw(sk_c30_brnw), .c30_baddr(sk_c30_baddr),
+    .c30_bdout(sk_c30_bdout), .c30_scs(sk_c30_scs), .c30_srnw(sk_c30_srnw), .c30_saddr(sk_c30_saddr),
+    .c30_sdout(sk_c30_sdout), .c30_xdin(c30_xdin),
+    .rom_a_addr(sk_rom_a_addr), .rom_a_q(rom_a_q), .rom_b_addr(sk_rom_b_addr), .rom_b_q(rom_b_q),
+    .prom_a_addr(sk_prom_a_addr), .prom_a_q(prom_a_q), .prom_b_addr(sk_prom_addr), .prom_b_q(prom_q),
+    .vram_aa(sk_vram_aa), .vram_da(sk_vram_da), .vram_wa(sk_vram_wa), .vram_qa(vram_qa), .vram_ab(sk_vram_ab), .vram_qb(vram_qb),
+    .wram_aa(sk_wram_aa), .wram_da(sk_wram_da), .wram_wa(sk_wram_wa), .wram_qa(sp_wram_qa), .wram_ab(sk_wram_ab),
+    .wram_qb(sp_wram_qb),
+    .xram_aa(sk_xram_aa), .xram_da(sk_xram_da), .xram_wa(sk_xram_wa), .xram_qa(xram_qa), .xram_ab(sk_xram_ab), .xram_qb(xram_qb),
+    .sram_aa(sk_sram_aa), .sram_da(sk_sram_da), .sram_wa(sk_sram_wa), .sram_qa(sram_qa),
+    .lbuf_aa(sk_lbuf_aa), .lbuf_da(sk_lbuf_da), .lbuf_wa(sk_lbuf_wa), .lbuf_ab(sk_lbuf_ab), .lbuf_qb(lbuf_qb),
+    .hs_address(hs_address), .hs_data_in(hs_data_in), .hs_data_out(sk_hs_q), .hs_write(hs_write)
+);
+
+assign ce_pix = is_sk ? sk_ce : sp_ce;
+assign {video_r, video_g, video_b} = is_sk ? {sk_r, sk_g, sk_b} : (is_sp | is_ph | is_mp | is_gp) ? {sp_r, sp_g, sp_b} : 24'd0;
+assign {video_hs, video_vs, video_hblank, video_vblank} = is_sk ? {sk_hs, sk_vs, sk_hb, sk_vb} : {sp_hs, sp_vs, sp_hb, sp_vb};
 // Gaplus: 62XX explosion (two DACs + band-pass filters) summed with the 15XX / 99XX
 logic signed [15:0] boom;
 gaplus_boom boom_0(.clk(clk), .reset(reset | ~is_gp), .smp(wsg15_0_smp), .o(mb88_0_o.o), .sound(boom));
 wire  signed [16:0] mix = 17'($signed(wsg15_0_o.sound)) + 17'(boom);
 wire  signed [15:0] mix_s = (mix > 17'sd32767) ? 16'sh7FFF : (mix < -17'sd32768) ? -16'sh8000 : mix[15:0];
-assign audio       = (is_sp | is_ph | is_mp) ? wsg15_0_o.sound : is_gp ? mix_s : 16'sd0;
-assign hs_data_out = (is_sp | is_ph | is_mp | is_gp) ? sp_hs_q : 8'd0;
+wire  signed [17:0] c30_x32 = 18'(c30_snd) <<< 5;      // CUS30 (13-bit, DC removed) x32 = MAME's level (Dragon Buster sim 2026-10-25)
+wire  signed [15:0] c30_out = (c30_x32 > 18'sd32767) ? 16'sh7FFF : (c30_x32 < -18'sd32768) ? -16'sh8000 : c30_x32[15:0];
+assign audio       = (is_sp | is_ph | is_mp) ? wsg15_0_o.sound : is_gp ? mix_s : is_sk ? c30_out : 16'sd0;
+assign hs_data_out = is_sk ? sk_hs_q : (is_sp | is_ph | is_mp | is_gp) ? sp_hs_q : 8'd0;
 
 endmodule

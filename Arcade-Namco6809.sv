@@ -431,7 +431,7 @@ namco6809_board board
 	           game_cfg[7],  game_cfg[6],  game_cfg[5],  game_cfg[4],  game_cfg[3],  game_cfg[2],  game_cfg[1], game_cfg[0]}),
 	.rom_ofs({{rom_ofs_b[9][0], rom_ofs_b[8], 8'd0}, {rom_ofs_b[7][0], rom_ofs_b[6], 8'd0}, {rom_ofs_b[5][0], rom_ofs_b[4], 8'd0},
 	          {rom_ofs_b[3][0], rom_ofs_b[2], 8'd0}, {rom_ofs_b[1][0], rom_ofs_b[0], 8'd0}}),
-	.crt_flip(status[36]),
+	.crt_flip(status[36] ^ game_flags[3]),   // game flag 3 = ROT180 (Sky Kid): the board flip turns the picture
 	.h_adj(status[46:43]),
 	.v_adj(status[50:47]),
 

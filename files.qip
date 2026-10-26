@@ -6,6 +6,20 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco6809_board.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_board.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/gaplus_stars.sv
+# Sky Kid board; HD63701 = jotego jt680x + jtframe_6801mcu (6301 microcode rtl/cpu/jt680x/6801.*), CUS30 = jotego jtcus30
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid_board.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/jtcus30/jtcus30.sv
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_alu.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_ctrl.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_regs.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jtframe_6801mcu.v
+set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jtframe_ram.v
+set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtcus30_mmr.v
+set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_dcrm.v
+set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_cendiv.v
+set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_dual_ram.v
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/namco_15xx.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/gaplus_boom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco/namco_io.sv
