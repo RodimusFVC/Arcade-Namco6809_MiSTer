@@ -127,14 +127,16 @@ endgenerate
 // copy without ram_clr); ram_clr tied off: this board has no MCU power-on RAM sweep.
 chip_pool_pkg::mb88_i_t mb88_0_i;
 chip_pool_pkg::mb88_o_t mb88_0_o;
-assign mb88_0_i.ena     = 1'b0;             // idle until the Gaplus board
-assign mb88_0_i.reset_n = 1'b0;
-assign mb88_0_i.k       = 4'hF;
-assign mb88_0_i.r_in    = 16'hFFFF;
-assign mb88_0_i.irq_n   = 1'b1;
-assign mb88_0_i.tc_n    = 1'b1;
-assign mb88_0_i.si_n    = 1'b1;
-assign mb88_0_i.rom_d   = 8'h00;
+logic  [7:0] mcu62_q;                        // 62XX ROM (mcu62_rom below)
+chip_pool_pkg::mb88_i_t sp_mb88_i;           // driven by the board (Gaplus 62XX), ROM from mcu62_rom
+assign mb88_0_i.ena     = sp_mb88_i.ena;
+assign mb88_0_i.reset_n = sp_mb88_i.reset_n;
+assign mb88_0_i.k       = sp_mb88_i.k;
+assign mb88_0_i.r_in    = sp_mb88_i.r_in;
+assign mb88_0_i.irq_n   = sp_mb88_i.irq_n;
+assign mb88_0_i.tc_n    = sp_mb88_i.tc_n;
+assign mb88_0_i.si_n    = sp_mb88_i.si_n;
+assign mb88_0_i.rom_d   = mcu62_q;
 
 wire  [3:0] mb88_r0, mb88_r1, mb88_r2, mb88_r3, mb88_ol, mb88_oh, mb88_p;
 wire        mb88_owr;
@@ -205,7 +207,7 @@ logic  [7:0] wave_addr;
 logic [10:0] mcu62_addr;
 logic  [7:0] prom_q, prom_a_q;
 /* verilator lint_off UNUSED */
-logic  [7:0] wave_q, mcu62_q;
+logic  [7:0] wave_q;
 /* verilator lint_on UNUSED */
 assign wave_addr  = wsg15_0_o.wave_a;
 assign mcu62_addr = mb88_0_o.rom_a;
@@ -308,6 +310,7 @@ superpac_board superpac
     .m6809_2_i(sp_m6809_2_i), .m6809_2_o(m6809_o[2]),
     .wsg_i(wsg15_0_i), .wsg_smp(wsg15_0_smp),
     .io0_i(namcoio_i[0]), .io0_o(namcoio_o[0]), .io1_i(namcoio_i[1]), .io1_o(namcoio_o[1]),
+    .mb88_i(sp_mb88_i), .mb88_o(mb88_0_o),
     .rom_a_addr(rom_a_addr), .rom_a_q(rom_a_q), .rom_b_addr(rom_b_addr), .rom_b_q(rom_b_q),
     .prom_a_addr(prom_a_addr), .prom_a_q(prom_a_q), .prom_b_addr(prom_addr), .prom_b_q(prom_q), .wave_q(wave_q[3:0]),
     .vram_aa(vram_aa), .vram_da(vram_da), .vram_wa(vram_wa), .vram_qa(vram_qa), .vram_ab(vram_ab), .vram_qb(vram_qb),
@@ -322,7 +325,12 @@ superpac_board superpac
 
 assign {video_r, video_g, video_b} = (is_sp | is_ph | is_mp | is_gp) ? {sp_r, sp_g, sp_b} : 24'd0;
 assign {video_hs, video_vs, video_hblank, video_vblank} = {sp_hs, sp_vs, sp_hb, sp_vb};
-assign audio       = (is_sp | is_ph | is_mp | is_gp) ? wsg15_0_o.sound : 16'sd0;
+// Gaplus: 62XX explosion (two DACs + band-pass filters) summed with the 15XX / 99XX
+logic signed [15:0] boom;
+gaplus_boom boom_0(.clk(clk), .reset(reset | ~is_gp), .smp(wsg15_0_smp), .o(mb88_0_o.o), .sound(boom));
+wire  signed [16:0] mix = 17'($signed(wsg15_0_o.sound)) + 17'(boom);
+wire  signed [15:0] mix_s = (mix > 17'sd32767) ? 16'sh7FFF : (mix < -17'sd32768) ? -16'sh8000 : mix[15:0];
+assign audio       = (is_sp | is_ph | is_mp) ? wsg15_0_o.sound : is_gp ? mix_s : 16'sd0;
 assign hs_data_out = (is_sp | is_ph | is_mp | is_gp) ? sp_hs_q : 8'd0;
 
 endmodule

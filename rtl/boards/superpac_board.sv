@@ -39,8 +39,13 @@
 //  ROM A000-FFFF) shares tilemap / work RAM as on Phozon; the sound CPU is MAME "sub2" (ROM offsets 1 / 2 swapped).
 //  No LS259: the 34XX decodes 7000 / 7800 (main IRQ enable, data in A11), 8000 / 8800 (sub + sound CPU run, sound
 //  on), 9000 / 9800 (I/O run); sub CPU 6000-6FFF IRQ enable (A0), sound CPU 4000 / 6000 IRQ enable (A13). They set
-//  the same latch bits as the LS259. Sound RAM 6000, I/O 6800 / 6810 / 6820 (62XX: MAME's customio_3 behaviour,
-//  explosion not modelled yet), starfield control A000-A003, watchdog 7800 read (off: MAME has none). 99XX DAC.
+//  the same latch bits as the LS259. Sound RAM 6000, I/O 6800 / 6810 / 6820, starfield control A000-A003, watchdog
+//  7800 read (off: MAME has none). 99XX DAC.
+//  62XX (6820-682F): the real MB88 program (namco62.zip, pool mb88_0) on the CUS16 I/O bus. The CPU side is the 2114
+//  (16 x 4 bits here); the 62XX is bus master at VBLANK: R8 low = request, R9 low = grant (CUS16, given at once
+//  here), R4-R6 = FA0-2, R7 = FR/W, R0-R3 = data. Reads (R7 = 1) see CPU offsets 8-F, writes (R7 = 0) land in
+//  offsets 0-7, taken when R4-R7 change with R7 low (data is set first). X = 2HB (1.536 MHz: one machine cycle per
+//  192 clocks), RESET = FRESET, R10/IRQ = VBLANK, K = IN2. Its O port drives the explosion DACs (gaplus_boom).
 //
 //============================================================================
 
@@ -90,6 +95,8 @@ module superpac_board
     input  chip_pool_pkg::namcoio_o_t io0_o,
     output chip_pool_pkg::namcoio_i_t io1_i,
     input  chip_pool_pkg::namcoio_o_t io1_o,
+    output chip_pool_pkg::mb88_i_t    mb88_i,             // Gaplus 62XX
+    input  chip_pool_pkg::mb88_o_t    mb88_o,
 
     output logic [16:0] rom_a_addr,             // packed ROM store
     input  logic  [7:0] rom_a_q,
@@ -434,20 +441,35 @@ assign io1_i.din     = do_[3:0];
 // Gaplus #1: DSWA high, DSWB low, DSWB high, DSWA low (MAME; DSW0 = DSWA, DSW1 = DSWB)
 assign io1_i.in      = {dsw0[3:0], dsw1[7:4], dsw1[3:0], gaplus ? dsw0[7:4] : io1_o.out[0] ? dsw2[7:4] : dsw2[3:0]};
 
-// Gaplus 62XX at 6820 (MAME customio_3): 16 bytes of RAM; 0 = IN2 (DSW2 bits 3-0), 1-3 depend on the mode (byte 8)
-logic [15:0][7:0] cio3 = '0;
-always_ff @(posedge clk) if (gaplus && cs_io && wr && a[5:4] == 2'd2) cio3[a[3:0]] <= do_;
-wire  cio3_m2 = cio3[8] == 8'd2;
-logic [7:0] cio3_q;
-always_comb begin
-    case (a[3:0])
-        4'd0:    cio3_q = {4'h0, dsw2[3:0]};
-        4'd1:    cio3_q = cio3_m2 ? cio3[1] : 8'h0F;
-        4'd2:    cio3_q = cio3_m2 ? 8'h0F : 8'h0E;
-        4'd3:    cio3_q = cio3_m2 ? cio3[3] : 8'h01;
-        default: cio3_q = cio3[a[3:0]];
-    endcase
+// Gaplus 62XX at 6820: the 2114 cells shared by the CPU and the 62XX (see the header)
+logic [15:0][3:0] cio3 = '0;
+logic  [7:0] c62 = 8'd0;
+always_ff @(posedge clk) c62 <= (c62 == 8'd191) ? 8'd0 : c62 + 8'd1;
+
+wire  [3:0] m62_p0 = mb88_o.r_out[3:0];
+wire  [3:0] m62_p1 = mb88_o.r_out[7:4];
+wire  [3:0] m62_p2 = mb88_o.r_out[11:8];
+wire        m62_gnt = !m62_p2[0];                   // R8 low: the CUS16 grants at once (R9 low)
+logic [3:0] m62_p1d = 4'hF;
+wire        m62_wr = gaplus && m62_gnt && !m62_p1[3] && m62_p1 != m62_p1d;
+always_ff @(posedge clk) begin
+    m62_p1d <= m62_p1;
+    if (m62_wr) cio3[{1'b0, m62_p1[2:0]}] <= m62_p0;
+    if (gaplus && cs_io && wr && a[5:4] == 2'd2) cio3[a[3:0]] <= do_[3:0];
 end
+wire [7:0] cio3_q = {4'hF, cio3[a[3:0]]};
+
+assign mb88_i.ena     = gaplus && c62 == 8'd0 && !pause;
+assign mb88_i.reset_n = gaplus && latch[4];
+assign mb88_i.k       = dsw2[3:0];
+assign mb88_i.r_in    = {mb88_o.r_out[15:12],
+                         m62_p2 & {1'b1, !video_vblank, !m62_gnt, 1'b1},
+                         m62_p1,
+                         m62_p0 & ((m62_gnt && m62_p1[3]) ? cio3[{1'b1, m62_p1[2:0]}] : 4'hF)};
+assign mb88_i.irq_n   = !video_vblank;              // R10/_IRQ = VBLANK (polarity #unverified: IRQ at vblank start)
+assign mb88_i.tc_n    = 1'b1;
+assign mb88_i.si_n    = 1'b1;
+assign mb88_i.rom_d   = 8'h00;                      // ROM read in the dispatcher (mcu62_rom)
 
 /////////////////////////////  CPU buses  /////////////////////////////
 

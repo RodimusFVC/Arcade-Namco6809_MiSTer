@@ -7,6 +7,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_board.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/gaplus_stars.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/namco_15xx.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/gaplus_boom.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco/namco_io.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/artwork.sv
