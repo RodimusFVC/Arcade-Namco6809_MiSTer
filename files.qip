@@ -1,42 +1,40 @@
 set_global_assignment -name VHDL_INPUT_VERSION VHDL_2008
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/chip_pool_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_pool_pkg.sv
 set_global_assignment -name SYSTEMVERILOG_FILE Arcade-Namco6809.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco6809_board.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_board.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac_video.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/gaplus_stars.sv
-# Sky Kid board; HD63701 = jotego jt680x + jtframe_6801mcu (6301 microcode rtl/cpu/jt680x/6801.*), CUS30 = jotego jtcus30
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid_board.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid_video.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/jtcus30/jtcus30.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco6809_dispatcher.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac/superpac_board.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac/superpac_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/superpac/gaplus_stars.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid/skykid_board.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/boards/skykid/skykid_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/gaplus_boom.sv
+
+set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809is.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/mb88/mb88_core.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/mb88/mb88.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/namco_15xx/namco_15xx.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/namco_io/namco_io.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/rodimus/namco_62xx/namco_62xx.sv
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_alu.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_ctrl.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jt680x_regs.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jtframe_6801mcu.v
 set_global_assignment -name VERILOG_FILE rtl/cpu/jt680x/jtframe_ram.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/jtcus30/jtcus30.sv
 set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtcus30_mmr.v
 set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_dcrm.v
 set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_cendiv.v
 set_global_assignment -name VERILOG_FILE rtl/sound/jtcus30/jtframe_dual_ram.v
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/namco_15xx.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/sound/gaplus_boom.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/namco/namco_io.sv
 
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/artwork.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/art_resample.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/png_decode.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/art/inflate.sv
 
-set_global_assignment -name VERILOG_FILE rtl/cpu/MC6809/mc6809is.v
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/mb88_sv/mb88_core.sv
-set_global_assignment -name SYSTEMVERILOG_FILE rtl/cpu/mb88_sv/mb88.sv
-
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/mister_custom/controllers.sv
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/pause.v
 set_global_assignment -name VERILOG_FILE rtl/mister_custom/hiscore.v
-
-# DPRAMSV-2026-10-25: VHDL dpram_dc replaced by the SystemVerilog one (same ports/generics + byteena); original:
-# set_global_assignment -name VHDL_FILE rtl/ram_rom/dpram_dc.vhd
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/ram_rom/dpram_dc.sv

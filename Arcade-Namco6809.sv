@@ -1,12 +1,11 @@
 //============================================================================
 //
 //  Namco 6809 / 15XX hardware for MiSTer (Super Pac-Man, Pac & Pal, Grobda, Phozon, Mappy, The Tower of Druaga,
-//  Dig Dug II, Motos, Gaplus / Galaga 3)
+//  Dig Dug II, Motos, Gaplus / Galaga 3, Sky Kid, Dragon Buster)
 //  Copyright (C) 2026 Rodimus
 //
-//  Built from MAME's mappy.cpp / gaplus.cpp drivers (Nicola Salmoria, Manuel Abadia, Ernesto Corvi) and the
-//  Bally Midway Super Pac-Man / Mappy schematics, with the MiSTer arcade framework by Sorgelig.
-//  Top level scaffolded from the Galaga core (2026-10-24). Boards: rtl/namco6809_board.sv (Super Pac-Man so far).
+//  Based on MAME mappy.cpp, gaplus.cpp, skykid.cpp (Manuel Abadia, Ernesto Corvi, Nicola Salmoria, BSD-3-Clause)
+//  Bally Midway Super Pac-Man / Mappy / Gaplus schematics; MiSTer arcade framework by Sorgelig.
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a
 //  copy of this software and associated documentation files (the "Software"),
@@ -45,8 +44,8 @@ wire        ioctl_upload_req;
 wire  [7:0] ioctl_din;
 wire        ioctl_wr;
 wire  [7:0] ioctl_index;
-wire [26:0] ioctl_addr27;                     // hps_io's full address: the artwork download can pass 32 MB
-wire [24:0] ioctl_addr = ioctl_addr27[24:0];  // every other ioctl user
+wire [26:0] ioctl_addr27;
+wire [24:0] ioctl_addr = ioctl_addr27[24:0];
 wire  [7:0] ioctl_dout;
 wire [15:0] joystick_0, joystick_1;
 wire [21:0] gamma_bus;
@@ -72,7 +71,7 @@ assign HDMI_BOB_DEINT = 0;
 wire signed [15:0] audio;
 assign AUDIO_L = pause_cpu ? 16'd0 : audio;
 assign AUDIO_R = pause_cpu ? 16'd0 : audio;
-assign AUDIO_S = 1;   // signed
+assign AUDIO_S = 1;
 assign AUDIO_MIX = 0;
 
 assign LED_DISK  = 0;
@@ -80,21 +79,6 @@ assign LED_POWER = 0;
 assign LED_USER  = ioctl_download;
 assign BUTTONS = 0;
 
-///////////////////////////////////////////////////
-
-// MRA index 1 (tools/gen_mra.py):
-//   byte 0      board variant (see rtl/namco6809_board.sv)
-//   byte 1      flags: [0] 4-way joystick, [2] coins are 2-frame pulses, [4] vertical, [7] vertical is ROT90
-//   byte 2      custom I/O kinds: [1:0] chip 0, [3:2] chip 1 (0 = 56XX, 1 = 58XX, 2 = 59XX)
-//   byte 3      per-set options: [0] no watchdog, [1] sprite ROM twice the board's base (256 sprites), [2] 64 sprite colours
-//   bytes 4-7   idle level of the non-DIP ports COINS, P1, P2, BUTTONS (here, not in <switches default>: only
-//               3 switch bytes survive Main_MiSTer's DIP default, see Common-Pitfalls)
-//   bytes 16-71 input map, one byte per port bit (COINS, P1, P2, BUTTONS, DSW0, DSW1, DSW2; bit 0 first)
-//   bytes 72-81 packed ROM store offsets, u16 LE in 256-byte units (17-bit, mod 2^17): maincpu, sub, sub2, tiles, sprites
-//   bytes 82-105 DIP bit permutation: for each DIP port (DSW0-2) and bit, its bit in the OSD DIP byte (identity except
-//               Phozon DSW2, whose non-contiguous fields the generator packs; Exidy core's scheme)
-// DIP switch bytes 0-2 = DSW0, DSW1, DSW2 (Gaplus: nibble ports packed by tools/gen_mra.py); a pressed control
-// inverts its bit
 localparam NPORT = 7;
 reg  [7:0] game_cfg[16] = '{8'd0, 8'h90, 8'd0, 8'd0, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0};
 reg  [7:0] in_map[NPORT*8];
@@ -118,13 +102,12 @@ wire vert_view = game_vert & ~status[34];
 
 wire [1:0] ar = status[33:32];
 
-wire        art_fb;                // artwork framebuffer on HDMI: square canvas pixels
+wire        art_fb;
 wire        art_wait, art_avail;
 wire [11:0] art_cw, art_ch;
 assign VIDEO_ARX = (!ar) ? (art_fb ? art_cw : vert_view ? 12'd3 : 12'd4) : 12'(ar - 1'd1);
 assign VIDEO_ARY = (!ar) ? (art_fb ? art_ch : vert_view ? 12'd4 : 12'd3) : 12'd0;
 
-// Status bits from 32 up (Galaga layout). Free: 1-31, 61-127.
 `include "build_id.v"
 localparam CONF_STR = {
 	"Namco6809;;",
@@ -157,7 +140,7 @@ localparam CONF_STR = {
 	"DIP;",
 	"-;",
 	"R0,Reset;",
-	"J1,Btn 1,Btn 2,Btn 3,Btn 4,Coin,Start 1P,Start 2P,Pause;",
+	"J1,Button 1,Button 2,Button 3,Button 4,Coin,Start 1P,Start 2P,Pause;",
 	"jn,A,B,X,Y,Select,Start,R,L;",
 	"V,v",`BUILD_DATE
 };
@@ -192,8 +175,8 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	.ps2_key(ps2_key)
 );
 
-
-////////////////////   CLOCKS   ///////////////////
+wire [63:0] reconfig_to_pll;
+wire [63:0] reconfig_from_pll;
 
 pll pll
 (
@@ -204,9 +187,6 @@ pll pll
 	.reconfig_from_pll(reconfig_from_pll),
 	.locked(locked)
 );
-
-wire [63:0] reconfig_to_pll;
-wire [63:0] reconfig_from_pll;
 wire        cfg_waitrequest;
 
 pll_cfg pll_cfg
@@ -223,39 +203,24 @@ pll_cfg pll_cfg
 	.reconfig_from_pll(reconfig_from_pll)
 );
 
-// Hold the board in reset until the PLL is locked and the whole MRA load has finished. Main_MiSTer releases the
-// sys reset on its first SPI access, before it sets status[0] for the MRA load: hold from FPGA configuration until
-// status[0] has been seen once (Galaga core, HW-proven).
 reg hps_ready = 1'b0;
 always @(posedge CLK_49M) if (status[0]) hps_ready <= 1'b1;
 wire reset = RESET | status[0] | buttons[1] | ioctl_download | ~locked | ~hps_ready;
 
-//////////////////  Arcade Buttons/Interfaces (rtl/mister_custom/controllers.sv)  ///////////////////////////
-
-// Joystick bits: 0 R, 1 L, 2 D, 3 U, 4-7 Btn 1-4, 8 Coin, 9 Start 1P, 10 Start 2P, 11 Pause
 wire [12:0] kb;
-// CTL-2026-10-25: original below (v1, pause not connected)
-// ctl_keyboard keyboard(.clk(CLK_49M), .ps2_key(ps2_key), .kb(kb));
-// CTL-2026-10-25: v2 pause port (no toggle keys here, so pause changes nothing); kbx unused
 /* verilator lint_off PINCONNECTEMPTY */
 ctl_keyboard keyboard(.clk(CLK_49M), .ps2_key(ps2_key), .pause(pause_cpu), .kb(kb), .kbx());
 /* verilator lint_on PINCONNECTEMPTY */
 
 wire [3:0] dir1_raw = {joystick_0[3] | kb[0], joystick_0[2] | kb[1], joystick_0[1] | kb[2], joystick_0[0] | kb[3]};
 wire [3:0] dir2_raw = joystick_1[3:0];
-wire [3:0] dir1, dir2;   // {U, D, L, R}
+wire [3:0] dir1, dir2;
 ctl_joy4way joy4way_1(.clk(CLK_49M), .en(game_flags[0]), .in(dir1_raw), .out(dir1));
 ctl_joy4way joy4way_2(.clk(CLK_49M), .en(game_flags[0]), .in(dir2_raw), .out(dir2));
 
 wire m_pause = joystick_0[11] | kb[12];
 
 wire coin1, coin2;
-// CTL-2026-10-25: original below (v1 pause form: a coin pressed while paused fired after resume)
-// ctl_coin_impulse coin_imp1(.clk(CLK_49M), .pause(pause_cpu), .vblank(vblank), .en(game_flags[2]),
-//                            .coin_raw(joystick_0[8] | kb[8]), .coin(coin1));
-// ctl_coin_impulse coin_imp2(.clk(CLK_49M), .pause(pause_cpu), .vblank(vblank), .en(game_flags[2]),
-//                            .coin_raw(joystick_1[8] | kb[9]), .coin(coin2));
-// CTL-2026-10-25: v2 PAUSE_MODE 1: a coin pressed while paused is discarded (library pause table); FRAMES 2 = v1 default
 ctl_coin_impulse #(.FRAMES(4'd2), .PAUSE_MODE(1)) coin_imp1(.clk(CLK_49M), .pause(pause_cpu), .vblank(vblank),
                            .en(game_flags[2]), .coin_raw(joystick_0[8] | kb[8]), .coin(coin1));
 ctl_coin_impulse #(.FRAMES(4'd2), .PAUSE_MODE(1)) coin_imp2(.clk(CLK_49M), .pause(pause_cpu), .vblank(vblank),
@@ -266,7 +231,6 @@ ctl_ids ids(.joy0(joystick_0), .joy1(joystick_1), .kb(kb), .dir1(dir1), .dir2(di
             .coin1(coin1), .coin2(coin2), .coin3(1'b0), .ctl(ctl36));
 wire [63:0] ctl = {28'd0, ctl36};
 
-// DIP switches arrive from the OSD via ioctl index 254: bytes 0-2 = DSW0, DSW1, DSW2
 reg [7:0] dip_sw[8] = '{8'hFF,8'hFF,8'hFF,8'h00,8'h00,8'h00,8'h00,8'h00};
 always @(posedge CLK_49M) begin
 	if (ioctl_wr && (ioctl_index == 8'd254) && !ioctl_addr[24:3])
@@ -275,7 +239,7 @@ end
 
 wire [NPORT*8-1:0]  idle;
 wire [NPORT*64-1:0] in_map_flat;
-wire [NPORT*8-1:0]  port_sel;                       // control ports: idle level; DSW0-2: OSD DIP bytes 0-2
+wire [NPORT*8-1:0]  port_sel;
 wire [NPORT*24-1:0] dip_bit;
 wire [63:0]         dip_bytes = {dip_sw[7], dip_sw[6], dip_sw[5], dip_sw[4], dip_sw[3], dip_sw[2], dip_sw[1], dip_sw[0]};
 genvar gi;
@@ -304,24 +268,23 @@ generate
 endgenerate
 
 wire [NPORT*8-1:0] in_ports;
-// DIPPERM-2026-10-25: BASE_MODE 2 (per-bit DIP permutation, Phozon); was BASE_MODE 0 with the DIP bytes as idle levels
-// ctl_port_map #(.NP(NPORT), .IDW(6)) port_map
 ctl_port_map #(.NP(NPORT), .IDW(6), .BASE_MODE(2)) port_map
 (
-// CTL-2026-10-25: original port list below (v1 had no port_sel / dip_bytes / dip_bit)
-// 	.clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .ctl(ctl),
-// 	.ovr_mask('0), .ovr_val('0), .ports(in_ports)
-	// CTL-2026-10-25: v2 ports tied 0 (BASE_MODE 0 = v1 idle levels; they are unused)
-	// DIPPERM-2026-10-25: original v2 tie-offs below
-	// .clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .port_sel({(NPORT*8){1'b0}}),
-	// .dip_bytes(64'd0), .dip_bit({(NPORT*24){1'b0}}), .ctl(ctl),
 	.clk(CLK_49M), .idle(idle), .in_map(in_map_flat), .dips(32'd0), .port_sel(port_sel),
 	.dip_bytes(dip_bytes), .dip_bit(dip_bit), .ctl(ctl),
 	.ovr_mask('0), .ovr_val('0), .ports(in_ports)
 );
 
-// PAUSE SYSTEM
 wire [23:0] rgb_out;
+wire [15:0] hs_address;
+wire  [7:0] hs_data_in;
+wire  [7:0] hs_data_out;
+wire        hs_write_enable;
+wire        hs_access_read;
+wire        hs_access_write;
+wire        hs_pause;
+wire        hs_configured;
+
 pause #(8,8,8,49) pause
 (
 	.*,
@@ -331,17 +294,12 @@ pause #(8,8,8,49) pause
 	.options(~status[41:40])
 );
 
-///////////////                 Video                  ////////////////
-
 wire hs, vs;
 wire [7:0] r, g, b;
 wire ce_pix;
 wire        bd_hs, bd_vs, bd_hbl, bd_vbl;
 wire  [7:0] bd_r, bd_g, bd_b;
 
-// MAME artwork (ioctl index 5, OSD Game Options page): native composite on the core video (one pixel late),
-// full view through the DDR3 framebuffer on HDMI. CODE_BITS 7 until Gaplus / Phozon colours per frame are measured
-// (Mappy family: 32-entry palette PROM, 5 bits would do).
 wire        art_run, art_ddr;
 wire [31:0] art_fb_base;
 wire  [7:0] art_burstcnt, art_be;
@@ -365,10 +323,9 @@ artwork #(.IDX(8'd5), .CODE_BITS(7)) artwork
 	.DDRAM_DOUT(DDRAM_DOUT), .DDRAM_DOUT_READY(DDRAM_DOUT_READY), .DDRAM_RD(art_rd),
 	.DDRAM_DIN(art_din), .DDRAM_BE(art_be), .DDRAM_WE(art_we)
 );
-// Orientation Horz (rotated monitor): the artwork turns its own view, so it keeps the framebuffer
 assign art_fb = art_run & ~direct_video;
 
-wire rotate_ccw = ~game_flags[7];  // ROT270 sets rotate CCW, ROT90 sets CW
+wire rotate_ccw = ~game_flags[7];
 wire no_rotate  = ~game_vert | status[34] | direct_video;
 wire flip       = status[35];
 wire        sr_fb_en, sr_clk, sr_rd, sr_we;
@@ -388,7 +345,6 @@ screen_rotate screen_rotate
 	.DDRAM_BE(sr_be), .DDRAM_WE(sr_we), .DDRAM_RD(sr_rd)
 );
 
-// the artwork takes the framebuffer while it draws, and DDR3 while it loads or draws
 assign FB_EN     = art_fb | sr_fb_en;
 assign FB_FORMAT = art_fb ? 5'b00110  : sr_fb_format;
 assign FB_WIDTH  = art_fb ? art_cw    : sr_fb_w;
@@ -418,10 +374,7 @@ arcade_video #(288,24) arcade_video
 	.fx(status[39:37])
 );
 
-///////////////                 Board                  ////////////////
-
-// CRT Flip (status[36]) = board-level 180-degree flip on every board; HDMI Flip (status[35]) on top of it
-namco6809_board board
+namco6809_dispatcher board
 (
 	.clk(CLK_49M),
 	.reset(reset),
@@ -431,7 +384,7 @@ namco6809_board board
 	           game_cfg[7],  game_cfg[6],  game_cfg[5],  game_cfg[4],  game_cfg[3],  game_cfg[2],  game_cfg[1], game_cfg[0]}),
 	.rom_ofs({{rom_ofs_b[9][0], rom_ofs_b[8], 8'd0}, {rom_ofs_b[7][0], rom_ofs_b[6], 8'd0}, {rom_ofs_b[5][0], rom_ofs_b[4], 8'd0},
 	          {rom_ofs_b[3][0], rom_ofs_b[2], 8'd0}, {rom_ofs_b[1][0], rom_ofs_b[0], 8'd0}}),
-	.crt_flip(status[36] ^ game_flags[3]),   // game flag 3 = ROT180 (Sky Kid): the board flip turns the picture
+	.crt_flip(status[36] ^ game_flags[3]),
 	.h_adj(status[46:43]),
 	.v_adj(status[50:47]),
 
@@ -464,17 +417,6 @@ namco6809_board board
 	.hs_data_out(hs_data_out),
 	.hs_write(hs_write_enable)
 );
-
-// Hiscore: config = MRA index 3, dump = index 4; the board's bus is handed to it while the CPUs are paused.
-// HS_SCOREWIDTH: set it to cover the largest hiscore.dat range of the supported sets before enabling saves.
-wire [15:0] hs_address;
-wire  [7:0] hs_data_in;
-wire  [7:0] hs_data_out;
-wire        hs_write_enable;
-wire        hs_access_read;
-wire        hs_access_write;
-wire        hs_pause;
-wire        hs_configured;
 
 hiscore #(
 	.HS_ADDRESSWIDTH(16),

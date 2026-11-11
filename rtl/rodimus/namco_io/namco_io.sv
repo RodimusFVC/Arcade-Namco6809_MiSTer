@@ -3,6 +3,8 @@
 //  Namco 56XX / 58XX / 59XX custom I/O (MB8843, undumped) - behavioural model, written from MAME namco/namcoio.cpp
 //  (Nicola Salmoria). Kind (index 1 byte 2): 0 = 56XX, 1 = 58XX, 2 = 59XX.
 //  Copyright (C) 2026 Rodimus
+//  SPDX-License-Identifier: BSD-3-Clause
+//  Written from MAME src/mame/namco/namcoio.cpp (license:BSD-3-Clause, copyright-holders: Nicola Salmoria)
 //
 //  CPU side = the 16XX nibble buffer: 16 nibbles, read as F0 | nibble. The command in nibble 8 runs once per
 //  frame (run strobe, MAME customio_run 50 us after vblank) while the chip is out of reset.

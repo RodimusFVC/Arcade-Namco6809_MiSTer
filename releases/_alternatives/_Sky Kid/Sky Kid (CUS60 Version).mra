@@ -25,7 +25,7 @@
     <joystick>8-way</joystick>
     <special_controls></special_controls>
     <num_buttons>2</num_buttons>
-    <buttons names="Fire,Loop,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+    <buttons names="Fire,Loop,-,-,Coin,Start 1P,Start 2P,Pause" default="A,B,Select,Start,R,L"/>
 
     <switches default="FF,FF,FF">
         <dip name="Coin B" bits="0,1" ids="3C/1C,2C/1C,1C/1C,1C/2C" values="0,1,3,2"/>
@@ -40,7 +40,7 @@
         <dip name="Lives" bits="14,15" ids="1,2,3,5" values="2,1,3,0"/>
     </switches>
 
-    <!-- Index 0: packed CPU / tile / sprite store 0x00000 (offsets in index 1), PROMs 0x18000, waveform 0x18800, 62XX 0x19000 -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="skykidd.zip|skykid.zip">
         <part crc="8370671a" name="sk1_2.6c"/>
         <part crc="070a49d4" name="sk1_1.6b"/>
@@ -60,7 +60,7 @@
         <part crc="076ea82a" name="cus60-60a1.mcu"/>
     </rom>
 
-    <!-- Index 1: board variant, flags, I/O kinds, control idle levels, input map, ROM offsets (see Arcade-Namco6809.sv) -->
+    <!-- Index 1: Config -->
     <rom index="1">
         <part>
             04 08 00 06 FF FF FF FF 00 00 00 00 00 00 00 00
@@ -73,7 +73,7 @@
         </part>
     </rom>
 
-    <!-- Index 3: hiscore config (MAME hiscore.dat), index 4: saved scores -->
+    <!-- Index 3: Hiscore -->
     <rom index="3" md5="none">
         <part>
             06 17 26 0E 00 FF 00 02 00 02 00 01 11 11 00 00
@@ -81,6 +81,7 @@
             00 00 50 01 00 01 03 03
         </part>
     </rom>
+    <!-- Index 4: NVRAM -->
     <rom index="4"></rom>
     <nvram index="4" size="70"></nvram>
 

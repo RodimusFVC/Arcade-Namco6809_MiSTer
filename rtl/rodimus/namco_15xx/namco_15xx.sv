@@ -4,6 +4,8 @@
 //  devices/sound/namco.cpp (namco_15xx_device; Nicola Salmoria, Aaron Giles) and the Mappy / Super Pac-Man CPU
 //  board schematics.
 //  Copyright (C) 2026 Rodimus
+//  SPDX-License-Identifier: BSD-3-Clause
+//  Based on MAME src/devices/sound/namco.cpp (license:BSD-3-Clause, copyright-holders: Nicola Salmoria, Aaron Giles)
 //
 //  Registers = the first 64 bytes of the CPU-shared sound RAM, snooped on write (8 bytes per voice):
 //    +2 counter MSBs (bits 4-0 = waveform step; Grobda's DAC trick), +3 volume (bits 3-0),

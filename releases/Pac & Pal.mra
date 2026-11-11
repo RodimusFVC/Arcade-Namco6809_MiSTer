@@ -25,7 +25,7 @@
     <joystick>4-way</joystick>
     <special_controls></special_controls>
     <num_buttons>1</num_buttons>
-    <buttons names="Button 1,Not Used,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+    <buttons names="Button 1,-,-,-,Coin,Start 1P,Start 2P,Pause" default="A,Select,Start,R,L"/>
 
     <switches default="FF,77,FF">
         <dip name="Cabinet" bits="2" ids="Upright,Cocktail" values="1,0"/>
@@ -37,7 +37,7 @@
         <dip name="Difficulty" bits="18,19" ids="Rank A,Rank B,Rank C,Rank D" values="3,2,1,0"/>
     </switches>
 
-    <!-- Index 0: packed CPU / tile / sprite store 0x00000 (offsets in index 1), PROMs 0x18000, waveform 0x18800, 62XX 0x19000 -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="pacnpal.zip">
         <part crc="ed64a565" name="pap1-3b.1d"/>
         <part crc="15308bcf" name="pap1-2b.1c"/>
@@ -53,7 +53,7 @@
         <part crc="94782db5" name="pap1-3.3m"/>
     </rom>
 
-    <!-- Index 1: board variant, flags, I/O kinds, control idle levels, input map, ROM offsets (see Arcade-Namco6809.sv) -->
+    <!-- Index 1: Config -->
     <rom index="1">
         <part>
             00 91 08 00 FF FF FF FF 00 00 00 00 00 00 00 00
@@ -66,7 +66,7 @@
         </part>
     </rom>
 
-    <!-- Index 3: hiscore config (MAME hiscore.dat), index 4: saved scores -->
+    <!-- Index 3: Hiscore -->
     <rom index="3" md5="none">
         <part>
             26 DC DA 73 00 FF 00 02 00 02 00 01 11 11 00 00
@@ -75,6 +75,7 @@
             00 00 03 ED 00 07 00 24
         </part>
     </rom>
+    <!-- Index 4: NVRAM -->
     <rom index="4"></rom>
     <nvram index="4" size="50"></nvram>
 

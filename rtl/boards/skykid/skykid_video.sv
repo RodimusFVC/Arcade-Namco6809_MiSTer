@@ -1,36 +1,15 @@
-//============================================================================
-//
-//  Sky Kid / Dragon Buster video (MAME namco/skykid.cpp; Namco 07XX-style timing, the Super Pac raster).
+//  Based on MAME skykid.cpp (Manuel Abadia, BSD-3-Clause)
 //  Copyright (C) 2026 Rodimus
-//
-//  Layers, back to front: background (64 x 32 tiles, opaque, scrolled), text tiles whose category (code bits 7-4)
-//  equals priority bits 7-4 when priority bit 2 is set, sprites, the other text tiles.
-//    Text   36 x 28 (Super Pac scan, RAM 4000-47FF: code, +400 colour), 2bpp, 16 bytes per char (bytes 8-15 =
-//           pixels 0-3), palette index {colour[5:0], pen}, pen 0 transparent. Game flip uses the second (pre-flipped)
-//           character set: positions mirror, glyph pixels do not.
-//    BG     RAM 2000-2FFF (code, +800 attribute): tile {attr[0], code}, colour {attr[0], attr[6:1]}; 2bpp, 16 bytes
-//           per tile (bytes 2y / 2y+1 = pixels 0-3 / 4-7); lookup PROM 300 + {colour, pen}. Scroll = written address.
-//           MAME (tilemap scroll 512 x 256 on a 288 x 224 screen): map x = x + sx + 35, y + sy + 25; game flip (the
-//           game runs flipped: A001 at boot) map x = 476 - x - (sx ^ 1), y = 230 - y - sy: the scroll counts the other way.
-//    Sprites the Mappy sprite generator: bank 0 x780 number / colour, bank 1 y / x, bank 2 flip / size, number
-//           bit 8, x MSB; 16 x 16 3bpp, lookup PROM 500 + {colour, pen}, FF transparent; no disable bit.
-//           Sprite ROM as loaded (MAME init_skykid unpacks it; decoded on read here): sprites 0-FF planes 1-2 at
-//           0000, plane 0 = the third ROM's low (0-7F) / high (80-FF) nibbles at 4000; sprites 100-1FF planes 1-2
-//           at 6000 (repeats every 80), no plane 0.
-//    RGB    4-bit PROMs 000 / 100 / 200 (MAME pal4bit).
-//  ROM store port A: text bytes in slot 0 (k = 0 / 4, as Super Pac), background bytes in slot 1 (k = 1 / 5).
-//
-//============================================================================
 
 module skykid_video
 (
-    input  logic        clk,                // 49.152 MHz
+    input  logic        clk,
     input  logic  [4:0] div,                // board divider: one pixel per div[2:0] cycle, hcnt[1:0] = div[4:3]
-    input  logic        flip,               // game flip (A000 / A001)
+    input  logic        flip,
     input  logic        crt_flip,
     input  logic  [8:0] scroll_x,
     input  logic  [7:0] scroll_y,
-    input  logic  [7:0] pri,                // A000 data: bit 2 enable, bits 7-4 text category under the sprites
+    input  logic  [7:0] pri,
     input  logic  [3:0] h_adj,
     input  logic  [3:0] v_adj,
 
@@ -38,22 +17,22 @@ module skykid_video
     output logic  [8:0] vcnt,
     output logic        vblank_start,
 
-    output logic [10:0] tx_a,               // text RAM (xram port B)
+    output logic [10:0] tx_a,
     input  logic  [7:0] tx_q,
-    output logic [11:0] bg_a,               // background RAM (vram port B)
+    output logic [11:0] bg_a,
     input  logic  [7:0] bg_q,
-    output logic [10:0] spr_a,              // sprite registers x780-x7FF of the three sprite RAM banks
+    output logic [10:0] spr_a,
     input  logic  [7:0] spr_q0,
     input  logic  [7:0] spr_q1,
     input  logic  [7:0] spr_q2,
-    output logic [12:0] txt_rom_a,          // chars region, slot 0
-    output logic [12:0] bg_rom_a,           // tiles region, slot 1
+    output logic [12:0] txt_rom_a,
+    output logic [12:0] bg_rom_a,
     input  logic  [7:0] tile_rom_q,
-    output logic [14:0] spr_rom_a,          // sprites region (port B)
+    output logic [14:0] spr_rom_a,
     input  logic  [7:0] spr_rom_q,
-    output logic [10:0] clut_a,             // colour PROMs, port B: RGB, background lookup
+    output logic [10:0] clut_a,
     input  logic  [7:0] clut_q,
-    output logic [10:0] slut_a,             // port A: sprite lookup
+    output logic [10:0] slut_a,
     input  logic  [7:0] slut_q,
     output logic  [9:0] lbuf_wa,
     output logic  [8:0] lbuf_wd,
@@ -73,9 +52,7 @@ module skykid_video
 wire [2:0] ph = div[2:0];
 wire       ce = ph == 3'd7;
 
-/////////////////////////////  Timing  /////////////////////////////
-
-logic [8:0] hc = 9'd0, vc = 9'd0;                      // free-running: hc[1:0] tracks div[4:3]
+logic [8:0] hc = 9'd0, vc = 9'd0;
 assign hcnt = hc;
 assign vcnt = vc;
 wire [8:0] vnext = (vc == 9'd263) ? 9'd0 : vc + 9'd1;
@@ -92,10 +69,6 @@ end
 
 assign vblank_start = ce && hc == 9'd383 && vc == 9'd223;
 
-/////////////////////////////  Text layer  /////////////////////////////
-
-// Super Pac pipeline: code / colour of tile t+2 at k = 6 / 7, char bytes of tile t+1 at k = 0 / 4 (slot 0).
-// tflip mirrors positions (game flip ^ CRT flip); glyph pixels mirror with the CRT flip only.
 wire       tflip = flip ^ crt_flip;
 wire [5:0] tcur  = hc[8:3];
 wire [2:0] k     = hc[2:0];
@@ -107,16 +80,16 @@ wire [8:0] yc2   = (tcur >= 6'd46) ? vnext : vc;
 wire [8:0] my1   = tflip ? 9'd223 - yc1 : yc1;
 wire [8:0] my2   = tflip ? 9'd223 - yc2 : yc2;
 wire [5:0] mc2   = tflip ? 6'd35 - tc2 : tc2;
-wire [5:0] cc2   = mc2 - 6'd2;                          // MAME col - 2: bit 5 = fixed side columns
+wire [5:0] cc2   = mc2 - 6'd2;
 wire [5:0] row2  = my2[8:3];
 wire [4:0] srw2  = row2[4:0] + 5'd2;
 wire [9:0] map_tx = cc2[5] ? {cc2[4:0], srw2} : {srw2, cc2[4:0]};
-assign tx_a = {k[0], map_tx};                           // k = 6: code, k = 7: colour
+assign tx_a = {k[0], map_tx};
 
 logic [7:0] code1, code2, attr1, attr2, tb0n, tb1n, tb0, tb1, tattr, tcode;
 
-wire       half  = k[2] ^ ~crt_flip;                   // bytes 8-15 = glyph pixels 0-3
-wire [2:0] trow  = my1[2:0] ^ {3{flip}};               // game flip: glyph rows not mirrored
+wire       half  = k[2] ^ ~crt_flip;
+wire [2:0] trow  = my1[2:0] ^ {3{flip}};
 assign txt_rom_a = {flip, code1, half, trow};
 
 always_ff @(posedge clk) begin
@@ -140,12 +113,6 @@ wire [7:0] tbyte = k[2] ? tb1 : tb0;
 wire [1:0] ti    = crt_flip ? ~k[1:0] : k[1:0];
 wire [1:0] tpen  = {tbyte[{1'b1, ~ti}], tbyte[{1'b0, ~ti}]};
 
-/////////////////////////////  Background  /////////////////////////////
-
-// Map position of screen pixel (x, y): base +/- x, base +/- y, the sign set by game flip ^ CRT flip (CRT flip takes the
-// native pixel at 287 - x / 223 - y). During screen tile t the layer fetches the tile under screen x = 8t + 16 (two
-// tiles ahead; next line from t = 46): code + attribute at k = 0, ROM bytes in slot 1 at k = 1 / 5, stored by tile
-// number bits 1-0 (the displayed tiles are 1-2 tiles behind, never the same entry).
 wire       bmir = flip ^ crt_flip;
 wire [8:0] sxf  = scroll_x ^ {8'd0, flip};
 wire [8:0] bxb  = flip ? (crt_flip ? 9'd189 - sxf : 9'd476 - sxf) : (crt_flip ? 9'd322 + sxf : 9'd35 + sxf);
@@ -156,14 +123,14 @@ wire [8:0] fy   = (tcur >= 6'd46) ? vnext : vc;
 wire [8:0] fbx  = bmir ? bxb - fx : bxb + fx;
 wire [7:0] fby  = bmir ? byb - fy[7:0] : byb + fy[7:0];
 
-logic [5:0] bt;                                         // tile column being fetched
+logic [5:0] bt;
 logic [2:0] brow;
 logic [7:0] bcode, battr, blo;
 logic [7:0] bl_lo[4], bl_hi[4];
 logic [6:0] bl_col[4];
 
-assign bg_a     = {ph[2], fby[7:3], fbx[8:3]};         // ph 0-3 code, 4-7 attribute (k = 0)
-assign bg_rom_a = {battr[0], bcode, brow, k[2]};       // k = 1: pixels 0-3, k = 5: 4-7
+assign bg_a     = {ph[2], fby[7:3], fbx[8:3]};
+assign bg_rom_a = {battr[0], bcode, brow, k[2]};
 
 always_ff @(posedge clk) begin
     if (k == 3'd0) begin
@@ -178,15 +145,11 @@ always_ff @(posedge clk) begin
     end
 end
 
-// displayed pixel
 wire [8:0] dbx  = bmir ? bxb - hc : bxb + hc;
 wire [7:0] bbyte = dbx[2] ? bl_hi[dbx[4:3]] : bl_lo[dbx[4:3]];
 wire [1:0] bpen  = {bbyte[{1'b1, ~dbx[1:0]}], bbyte[{1'b0, ~dbx[1:0]}]};
 wire [6:0] bcol  = bl_col[dbx[4:3]];
 
-/////////////////////////////  Colour mix  /////////////////////////////
-
-// Pixel at hcnt: background lookup at ph 0-1, then the R / G / B PROMs at ph 2-4; output during the next pixel.
 logic [7:0] bg_c, spr_c;
 logic [7:0] tx_c;
 logic       tx_on, tx_low;
@@ -216,8 +179,8 @@ always_ff @(posedge clk) begin
     if (ph == 3'd5) pb_q <= clut_q[3:0];
 end
 
-wire [8:0] hs_on = 9'd312 + {{4{h_adj[3]}}, h_adj, 1'b0};    // 24 px front porch, 32 sync
-wire [8:0] vs_on = 9'd232 + {{5{v_adj[3]}}, v_adj};          // 8 lines front porch, 8 sync
+wire [8:0] hs_on = 9'd312 + {{4{h_adj[3]}}, h_adj, 1'b0};
+wire [8:0] vs_on = 9'd232 + {{5{v_adj[3]}}, v_adj};
 wire       h_vis = hc < 9'd288;
 wire       v_vis = vc < 9'd224;
 
@@ -233,10 +196,6 @@ always_ff @(posedge clk) begin
     end
 end
 
-/////////////////////////////  Sprite engine  /////////////////////////////
-
-// During line L the engine draws line L+1 into the other half of the line buffer: clear 288 pixels to FF, then the
-// 64 sprites in order (later ones on top). CRT flip: the line drawn is picture line 223 - L+1, each pixel at 287 - x.
 localparam S_IDLE = 3'd0, S_CLR = 3'd1, S_RD0 = 3'd2, S_RD1 = 3'd3, S_RD2 = 3'd4, S_EVAL = 3'd5, S_ROM = 3'd6,
            S_PIX = 3'd7;
 logic [2:0] st = S_IDLE;
@@ -253,7 +212,6 @@ logic [7:0] sb0, sb1;
 
 assign spr_a = {4'hF, s, st == S_RD1};
 
-// EVAL (MAME: sy = ((249 - y - 16 * y size) & 0xFF) - 32, one-line buffer delay as the Mappy board)
 wire        e_szx = a0[2], e_szy = a0[3];
 wire  [7:0] e_s1  = 8'd249 - y0 - {3'd0, e_szy, 4'd0};
 wire  [9:0] e_row = {1'b0, tgt} + 10'd32 - {2'd0, e_s1};
@@ -319,7 +277,7 @@ always_ff @(posedge clk) begin
             else if (s == 6'd63) st <= S_IDLE;
             else begin s <= s + 6'd1; st <= S_RD0; end
         end
-        S_ROM: begin                                   // board registers the packed address: data after 3 clocks
+        S_ROM: begin
             wcnt <= wcnt + 2'd1;
             if (wcnt == 2'd2) begin
                 wcnt <= 2'd0;

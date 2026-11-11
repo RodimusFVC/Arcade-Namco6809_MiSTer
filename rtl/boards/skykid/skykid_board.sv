@@ -1,40 +1,23 @@
-//============================================================================
-//
-//  Sky Kid / Dragon Buster board (MAME namco/skykid.cpp): MC6809E main CPU, HD63701 MCU (I/O + sound driver),
-//  CUS30 8-voice waveform sound (RAM shared by both CPUs), video in skykid_video.sv.
+//  Based on MAME skykid.cpp (Manuel Abadia, BSD-3-Clause)
 //  Copyright (C) 2026 Rodimus
-//
-//  Main CPU (pool m6809_0, E at div 31): 0000-1FFF ROM bank (two 8K pages of region 10000), 2000-2FFF background
-//    RAM (pool vram), 4000-47FF text RAM (pool xram), 4800-5FFF sprite RAM (pool wram 0-2), 6000-60FF scroll y and
-//    6200-63FF scroll x (= the written address), 6800-6BFF CUS30, 7000 / 7800 IRQ enable (data in A11), 7800 read
-//    watchdog (MAME: none), 8000 / 8800 MCU run / reset, 9000 / 9800 ROM bank 1 / 0, A000-A001 priority (data) +
-//    flip (A0), 8000-FFFF ROM.
-//  MCU (pool mcu6801, HD63701 mode 6, crystal 6.144 MHz = div / 8): 1000-13FF CUS30, 2000-3FFF watchdog (ignored),
-//    4000 / 6000 IRQ enable (data in A13), 8000-9FFF sub ROM and F000-FFFF internal ROM (dispatcher MCU ROM block),
-//    C000-C7FF RAM (pool sram). Port 1: input select (write 011x xsss) and the selected input (MAME inputport_r).
-//  CUS30 RAM: the main CPU owns it at div 28-31 (its E falls at 31), the MCU (clocked at div 3 / 11 / 19 / 27) the
-//    rest of the time, so each sees its own data at its sampling clock.
-//  ROM store port A: slot 0 text tiles, slot 1 background tiles, slots 2-3 main CPU (captured at div 30).
-//
-//============================================================================
 
-module skykid_board
+module skykid_board #(parameter int RAM_BLOCKS = 6)
 (
-    input  logic        clk,                    // 49.152 MHz
+    input  logic        clk,
     input  logic        reset,
     input  logic        pause,
-    input  logic [4:0][16:0] rom_ofs,           // 0 maincpu, 1 chars, 3 tiles, 4 sprites
+    input  logic [4:0][16:0] rom_ofs,
     input  logic        crt_flip,
     input  logic  [3:0] h_adj,
     input  logic  [3:0] v_adj,
 
-    input  logic  [7:0] in_system,              // MAME ports (active low): SYSTEM, P1, P2, BUTTON2, DSWA, DSWB
+    input  logic  [7:0] in_system,
     input  logic  [7:0] in_p1,
     input  logic  [7:0] in_p2,
     input  logic  [7:0] in_button2,
     input  logic  [7:0] dswa,
     input  logic  [7:0] dswb,
-    input  logic  [7:0] dsw2,                   // bit 1: Dragon Buster Cabinet DIP (MAME: in BUTTON2; gen_mra moves it here)
+    input  logic  [7:0] dsw2,
 
     output logic        ce_pix,
     output logic  [7:0] video_r,
@@ -45,33 +28,15 @@ module skykid_board
     output logic        video_hblank,
     output logic        video_vblank,
 
-    // pools (rtl/namco6809_board.sv)
     output chip_pool_pkg::m6809r_i_t  m6809_0_i,
     input  chip_pool_pkg::m6809r_o_t  m6809_0_o,
 
-    output logic        mcu_rst,
-    output logic        mcu_cen,
-    output logic        mcu_irq,
-    output logic  [7:0] mcu_xdin,
-    output logic  [7:0] mcu_p1_din,
-    input  logic [15:0] mcu_addr,
-    input  logic  [7:0] mcu_dout,
-    input  logic        mcu_wr,
-    input  logic        mcu_xcs,
-    input  logic  [7:0] mcu_p1_dout,
-    input  logic  [7:0] mcu_rom_q,              // MCU ROM block at mcu_addr (sub ROM / internal ROM)
+    output chip_pool_pkg::hd63701_i_t mcu_0_i,
+    input  chip_pool_pkg::hd63701_o_t mcu_0_o,
+    input  logic  [7:0] mcu_rom_q,
 
-    output logic        c30_cen,
-    output logic        c30_bsel,
-    output logic        c30_bcs,
-    output logic        c30_brnw,
-    output logic  [9:0] c30_baddr,
-    output logic  [7:0] c30_bdout,
-    output logic        c30_scs,
-    output logic        c30_srnw,
-    output logic [15:0] c30_saddr,
-    output logic  [7:0] c30_sdout,
-    input  logic  [7:0] c30_xdin,
+    output chip_pool_pkg::cus30_i_t   cus30_0_i,
+    input  chip_pool_pkg::cus30_o_t   cus30_0_o,
 
     output logic [16:0] rom_a_addr,
     input  logic  [7:0] rom_a_q,
@@ -82,28 +47,8 @@ module skykid_board
     output logic [10:0] prom_b_addr,
     input  logic  [7:0] prom_b_q,
 
-    output logic [11:0] vram_aa,
-    output logic  [7:0] vram_da,
-    output logic        vram_wa,
-    input  logic  [7:0] vram_qa,
-    output logic [11:0] vram_ab,
-    input  logic  [7:0] vram_qb,
-    output logic [2:0][10:0] wram_aa,
-    output logic [2:0] [7:0] wram_da,
-    output logic [2:0]       wram_wa,
-    input  logic [2:0] [7:0] wram_qa,
-    output logic      [10:0] wram_ab,
-    input  logic [2:0] [7:0] wram_qb,
-    output logic [10:0] xram_aa,
-    output logic  [7:0] xram_da,
-    output logic        xram_wa,
-    input  logic  [7:0] xram_qa,
-    output logic [10:0] xram_ab,
-    input  logic  [7:0] xram_qb,
-    output logic [10:0] sram_aa,
-    output logic  [7:0] sram_da,
-    output logic        sram_wa,
-    input  logic  [7:0] sram_qa,
+    output ram_pool_pkg::pram_i_t [RAM_BLOCKS-1:0] pr_i,
+    input  ram_pool_pkg::pram_o_t [RAM_BLOCKS-1:0] pr_o,
     output logic  [9:0] lbuf_aa,
     output logic  [8:0] lbuf_da,
     output logic        lbuf_wa,
@@ -116,22 +61,89 @@ module skykid_board
     input  logic        hs_write
 );
 
-/////////////////////////////  Clocks  /////////////////////////////
+logic        mcu_rst, mcu_cen, mcu_irq, mcu_wr, mcu_xcs;
+logic  [7:0] mcu_xdin, mcu_p1_din, mcu_dout, mcu_p1_dout;
+logic [15:0] mcu_addr;
+assign mcu_0_i.rst     = mcu_rst;
+assign mcu_0_i.cen     = mcu_cen;
+assign mcu_0_i.cen_tmr = mcu_cen;
+assign mcu_0_i.irq     = mcu_irq;
+assign mcu_0_i.nmi     = 1'b0;
+assign mcu_0_i.xdin    = mcu_xdin;
+assign mcu_0_i.p1_din  = mcu_p1_din;
+assign mcu_0_i.p2_din  = 5'h1F;
+assign mcu_0_i.p3_din  = 8'hFF;
+assign mcu_0_i.p4_din  = 8'hFF;
+assign mcu_addr    = mcu_0_o.addr;
+assign mcu_dout    = mcu_0_o.dout;
+assign mcu_wr      = mcu_0_o.wr;
+assign mcu_xcs     = mcu_0_o.x_cs;
+assign mcu_p1_dout = mcu_0_o.p1_dout;
 
-logic [4:0] div = 5'd0;                         // never reset: hcnt[1:0] = div[4:3] (ROM port-A slots)
+logic        c30_cen, c30_bsel, c30_bcs, c30_brnw, c30_scs, c30_srnw;
+logic  [9:0] c30_baddr;
+logic  [7:0] c30_bdout, c30_sdout, c30_xdin;
+logic [15:0] c30_saddr;
+assign cus30_0_i.rst   = 1'b0;
+assign cus30_0_i.cen   = c30_cen;
+assign cus30_0_i.bsel  = c30_bsel;
+assign cus30_0_i.bcs   = c30_bcs;
+assign cus30_0_i.brnw  = c30_brnw;
+assign cus30_0_i.baddr = c30_baddr;
+assign cus30_0_i.bdout = c30_bdout;
+assign cus30_0_i.scs   = c30_scs;
+assign cus30_0_i.srnw  = c30_srnw;
+assign cus30_0_i.saddr = c30_saddr;
+assign cus30_0_i.sdout = c30_sdout;
+assign c30_xdin = cus30_0_o.xdin;
+
+logic [11:0] vram_aa, vram_ab;
+logic  [7:0] vram_da, vram_qa, vram_qb;
+logic        vram_wa;
+logic [2:0][10:0] wram_aa;
+logic [2:0] [7:0] wram_da, wram_qa, wram_qb;
+logic [2:0]       wram_wa;
+logic      [10:0] wram_ab;
+logic [10:0] xram_aa, xram_ab;
+logic  [7:0] xram_da, xram_qa, xram_qb;
+logic        xram_wa;
+logic [10:0] sram_aa;
+logic  [7:0] sram_da, sram_qa;
+logic        sram_wa;
+
+assign pr_i[0].a_addr = {4'd0, vram_aa};      assign pr_i[0].a_d = vram_da;     assign pr_i[0].a_we = vram_wa;
+assign pr_i[0].b_addr = {4'd0, vram_ab};      assign pr_i[0].b_d = 8'd0;        assign pr_i[0].b_we = 1'b0;
+assign vram_qa = pr_o[0].a_q;                 assign vram_qb = pr_o[0].b_q;
+assign pr_i[1].a_addr = {5'd0, wram_aa[0]};   assign pr_i[1].a_d = wram_da[0];  assign pr_i[1].a_we = wram_wa[0];
+assign pr_i[1].b_addr = {5'd0, wram_ab};      assign pr_i[1].b_d = 8'd0;        assign pr_i[1].b_we = 1'b0;
+assign wram_qa[0] = pr_o[1].a_q;              assign wram_qb[0] = pr_o[1].b_q;
+assign pr_i[2].a_addr = {5'd0, wram_aa[1]};   assign pr_i[2].a_d = wram_da[1];  assign pr_i[2].a_we = wram_wa[1];
+assign pr_i[2].b_addr = {5'd0, wram_ab};      assign pr_i[2].b_d = 8'd0;        assign pr_i[2].b_we = 1'b0;
+assign wram_qa[1] = pr_o[2].a_q;              assign wram_qb[1] = pr_o[2].b_q;
+assign pr_i[3].a_addr = {5'd0, wram_aa[2]};   assign pr_i[3].a_d = wram_da[2];  assign pr_i[3].a_we = wram_wa[2];
+assign pr_i[3].b_addr = {5'd0, wram_ab};      assign pr_i[3].b_d = 8'd0;        assign pr_i[3].b_we = 1'b0;
+assign wram_qa[2] = pr_o[3].a_q;              assign wram_qb[2] = pr_o[3].b_q;
+assign pr_i[4].a_addr = {5'd0, xram_aa};      assign pr_i[4].a_d = xram_da;     assign pr_i[4].a_we = xram_wa;
+assign pr_i[4].b_addr = {5'd0, xram_ab};      assign pr_i[4].b_d = 8'd0;        assign pr_i[4].b_we = 1'b0;
+assign xram_qa = pr_o[4].a_q;                 assign xram_qb = pr_o[4].b_q;
+assign pr_i[5].a_addr = {5'd0, sram_aa};      assign pr_i[5].a_d = sram_da;     assign pr_i[5].a_we = sram_wa;
+assign pr_i[5].b_addr = 16'd0;                assign pr_i[5].b_d = 8'd0;        assign pr_i[5].b_we = 1'b0;
+assign sram_qa = pr_o[5].a_q;
+
+// div is never reset: the video counters rely on hcnt[1:0] = div[4:3] (ROM port-A slots).
+logic [4:0] div = 5'd0;
 always_ff @(posedge clk) div <= div + 5'd1;
 
-logic [1:0] pause_d = 2'b00;                    // hiscore borrows the RAM ports while paused (+2 clocks)
+// The hiscore borrows the CPU RAM ports while paused; the CPUs stay held 2 clocks longer so their first read sees their own address.
+logic [1:0] pause_d = 2'b00;
 always_ff @(posedge clk) pause_d <= {pause_d[0], pause};
 wire pause_x = pause | (|pause_d);
 
-wire fall_q = (div == 5'd23) & ~pause_x;        // main CPU, 1.536 MHz
+wire fall_q = (div == 5'd23) & ~pause_x;
 wire fall_e = (div == 5'd31) & ~pause_x;
-assign mcu_cen  = (div[2:0] == 3'd3) & ~pause_x;    // HD63701 crystal 6.144 MHz (E = 1.536 MHz)
-assign c30_cen  = (div[3:0] == 4'd5) & ~pause_x;    // CUS30 3.072 MHz (jtcus30: 48 kHz voice steps)
+assign mcu_cen  = (div[2:0] == 3'd3) & ~pause_x;
+assign c30_cen  = (div[3:0] == 4'd5) & ~pause_x;
 assign ce_pix   = div[2:0] == 3'd7;
-
-/////////////////////////////  Video  /////////////////////////////
 
 logic        vblank_start;
 logic        flip = 1'b0;
@@ -157,14 +169,11 @@ skykid_video video
     .hblank(video_hblank), .vblank(video_vblank)
 );
 
-/////////////////////////////  Main CPU  /////////////////////////////
-
 wire [15:0] a   = m6809_0_o.a;
 wire  [7:0] do_ = m6809_0_o.dout;
 wire        rw  = m6809_0_o.rw;
 wire        wr  = fall_e & ~rw;
 
-// RAM decode for an address (CPU or hiscore): 0 background, 1 text, 2-4 sprite banks, 7 none
 function automatic [2:0] ram_bank(input [15:0] x);
     if (x[15:12] == 4'h2) ram_bank = 3'd0;
     else case (x[15:11])
@@ -185,11 +194,9 @@ wire cs_c30   = a[15:10] == 6'b011010;
 wire cs_irq   = a[15:12] == 4'h7;
 wire cs_mres  = a[15:12] == 4'h8;
 wire cs_bank  = a[15:12] == 4'h9;
-wire cs_pri   = a[15:1] == 15'h5000;            // A000-A001
+wire cs_pri   = a[15:1] == 15'h5000;
 
-/////////////////////////////  Control, IRQs, reset  /////////////////////////////
-
-// Reset release synchronised to the frame start (as the Super Pac board: MAME starts with the beam on line 0)
+// CPU reset released at the frame start (beam at line 0): boot code runs without IRQs, a random phase vs vblank kills Pac & Pal's sound CPU.
 logic run_ok = 1'b0;
 always_ff @(posedge clk) begin
     if (reset)                                           run_ok <= 1'b0;
@@ -204,7 +211,7 @@ always_ff @(posedge clk) begin
     if (cpu_rst) begin
         main_mask <= 1'b0;
         mcu_mask  <= 1'b0;
-        mcu_run   <= 1'b1;                       // MAME: the MCU runs from power-on until 8800 is written
+        mcu_run   <= 1'b1;
         rbank     <= 1'b0;
         flip      <= 1'b0;
         pri       <= 8'd0;
@@ -224,9 +231,6 @@ always_ff @(posedge clk) begin
     else if (vblank_start)     irq_u <= 1'b1;
 end
 
-/////////////////////////////  ROM store  /////////////////////////////
-
-// main CPU region address: 0000-1FFF = bank page at 10000 / 12000, 8000-FFFF as is
 wire [16:0] main_ra = cs_rbank ? {3'b100, rbank, a[12:0]} : {1'b0, a};
 wire [16:0] main_pk = main_ra + rom_ofs[0];
 wire [16:0] txt_pk  = {4'd0, txt_rom_a} + rom_ofs[1];
@@ -235,7 +239,7 @@ logic [7:0] main_rom_q;
 
 always_ff @(posedge clk) begin
     case (div[4:3])
-        2'd0:    rom_a_addr <= txt_pk;          // video reads at div 6 / 14
+        2'd0:    rom_a_addr <= txt_pk;
         2'd1:    rom_a_addr <= bg_pk;
         default: rom_a_addr <= main_pk;
     endcase
@@ -243,9 +247,6 @@ always_ff @(posedge clk) begin
     if (div == 5'd30) main_rom_q <= rom_a_q;
 end
 
-/////////////////////////////  RAMs  /////////////////////////////
-
-// port A: main CPU, or the hiscore system while paused
 wire [15:0] pa_x  = pause ? hs_address : a;
 wire  [2:0] pa_bk = ram_bank(pa_x);
 wire        pa_we = pause ? hs_write : wr;
@@ -277,15 +278,12 @@ always_comb begin
     endcase
 end
 
-// MCU RAM C000-C7FF
 wire mcu_ram = mcu_addr[15:11] == 5'b11000;
 assign sram_aa = mcu_addr[10:0];
 assign sram_da = mcu_dout;
 assign sram_wa = mcu_xcs && mcu_wr && mcu_ram;
 
-/////////////////////////////  CUS30  /////////////////////////////
-
-assign c30_bsel  = div[4:2] == 3'b111;          // main CPU at div 28-31
+assign c30_bsel  = div[4:2] == 3'b111;
 assign c30_bcs   = cs_c30;
 assign c30_brnw  = rw;
 assign c30_baddr = a[9:0];
@@ -294,8 +292,6 @@ assign c30_scs   = mcu_xcs && mcu_addr[15:10] == 6'b000100;
 assign c30_srnw  = ~mcu_wr;
 assign c30_saddr = mcu_addr;
 assign c30_sdout = mcu_dout;
-
-/////////////////////////////  MCU  /////////////////////////////
 
 assign mcu_rst = cpu_rst | ~mcu_run;
 assign mcu_irq = irq_u;
@@ -307,7 +303,6 @@ always_comb begin
     else                                 mcu_xdin = 8'hFF;
 end
 
-// port 1: written 011x xsss selects the input (11 0x xxxx = coin lockout / counters, not modelled)
 logic [2:0] in_sel = 3'd0;
 always_ff @(posedge clk) if (mcu_p1_dout[7:5] == 3'b011) in_sel <= mcu_p1_dout[2:0];
 always_comb begin
@@ -322,8 +317,6 @@ always_comb begin
         default: mcu_p1_din = 8'hFF;
     endcase
 end
-
-/////////////////////////////  CPU bus  /////////////////////////////
 
 logic [7:0] main_di;
 always_comb begin

@@ -25,7 +25,7 @@
     <joystick>8-way</joystick>
     <special_controls></special_controls>
     <num_buttons>2</num_buttons>
-    <buttons names="Jump,Button 2,Not Used,Not Used,Coin,Start 1P,Start 2P,Pause" default="A,B,X,Y,Select,Start,R,L"/>
+    <buttons names="Jump,Button 2,-,-,Coin,Start 1P,Start 2P,Pause" default="A,B,Select,Start,R,L"/>
 
     <switches default="FF,FF,FF">
         <dip name="Cabinet" bits="2" ids="Upright,Cocktail" values="1,0"/>
@@ -37,7 +37,7 @@
         <dip name="Demo Sounds" bits="15" ids="Off,On"/>
     </switches>
 
-    <!-- Index 0: packed CPU / tile / sprite store 0x00000 (offsets in index 1), PROMs 0x18000, waveform 0x18800, 62XX 0x19000 -->
+    <!-- Index 0: ROM -->
     <rom index="0" md5="none" zip="motos.zip">
         <part crc="1104abb2" name="mo1_3.1d"/>
         <part crc="57b157e2" name="mo1_1.1b"/>
@@ -53,7 +53,7 @@
         <part crc="2accdfb4" name="mo1-3.3m"/>
     </rom>
 
-    <!-- Index 1: board variant, flags, I/O kinds, control idle levels, input map, ROM offsets (see Arcade-Namco6809.sv) -->
+    <!-- Index 1: Config -->
     <rom index="1">
         <part>
             02 90 00 02 FF FF FF FF 00 00 00 00 00 00 00 00
@@ -66,7 +66,7 @@
         </part>
     </rom>
 
-    <!-- Index 3: hiscore config (MAME hiscore.dat), index 4: saved scores -->
+    <!-- Index 3: Hiscore -->
     <rom index="3" md5="none">
         <part>
             10 62 DA 33 00 FF 00 02 00 02 00 01 11 11 00 00
@@ -74,11 +74,11 @@
             00 00 18 31 00 04 00 00
         </part>
     </rom>
+    <!-- Index 4: NVRAM -->
     <rom index="4"></rom>
     <nvram index="4" size="164"></nvram>
 
-    <!-- Index 5: MAME artwork, layout table (from default.lay) + PNGs from the artwork zip, as-is -->
-    <!-- OSD Artwork: View 1 = NMVA Artwork, View 2 = NMVA Artwork 4:3 -->
+    <!-- Index 5: Artwork -->
     <rom index="5" md5="none" zip="/mame-artwork/motos.zip">
         <part>
             41 57 02 00 04 00 20 01 E0 00 02 00 00 00 00 00 C4 03 1E 02 22 01 0E 00 80 01 00 02 00 16 02 00
